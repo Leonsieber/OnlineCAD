@@ -1,0 +1,93 @@
+import { Box3, Plane, Raycaster, Sphere, Vector2, Vector3, type Camera } from 'three';
+import { useStore } from '../store/store';
+import type { Vec3 } from '../model/types';
+import { viewRefs } from './registry';
+
+export type ViewName = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'iso';
+
+const VIEW_DIRS: Record<ViewName, Vec3> = {
+  front: [0, -1, 0],
+  back: [0, 1, 0],
+  left: [-1, 0, 0],
+  right: [1, 0, 0],
+  // A hair of tilt keeps the "up" direction well defined when looking straight down or up.
+  top: [0, -1e-4, 1],
+  bottom: [0, 1e-4, -1],
+  iso: [1, -1, 0.85],
+};
+
+let getCamera: () => Camera | null = () => null;
+let invalidateFn: () => void = () => {};
+
+export function bindView(camera: () => Camera | null, invalidate: () => void) {
+  getCamera = camera;
+  invalidateFn = invalidate;
+}
+
+/** Bounding box of visible parts (or of the given part ids). */
+export function partsBox(ids?: string[]): Box3 {
+  const { parts, doc } = useStore.getState();
+  const box = new Box3();
+  for (const p of parts) {
+    if (ids && !ids.includes(p.id)) continue;
+    if (!ids && doc.parts[p.id]?.hidden) continue;
+    box.expandByPoint(new Vector3(...p.bbox[0]));
+    box.expandByPoint(new Vector3(...p.bbox[1]));
+  }
+  return box;
+}
+
+function fitSphere(ids?: string[]): Sphere {
+  const box = partsBox(ids);
+  if (box.isEmpty()) return new Sphere(new Vector3(0, 0, 10), 60);
+  const s = box.getBoundingSphere(new Sphere());
+  s.radius = Math.max(s.radius, 5);
+  return s;
+}
+
+export const viewApi = {
+  invalidate() {
+    invalidateFn();
+  },
+  fitAll(animate = true, ids?: string[]) {
+    const c = viewRefs.controls;
+    if (!c) return;
+    void c.fitToSphere(fitSphere(ids), animate);
+  },
+  setView(name: ViewName, animate = true) {
+    const c = viewRefs.controls;
+    const cam = getCamera();
+    if (!c || !cam) return;
+    const s = fitSphere();
+    const fov = 'fov' in cam ? ((cam as { fov: number }).fov * Math.PI) / 180 : 0.6;
+    const dist = (s.radius / Math.sin(fov / 2)) * 1.05;
+    const d = new Vector3(...VIEW_DIRS[name]).normalize().multiplyScalar(dist);
+    void c.setLookAt(s.center.x + d.x, s.center.y + d.y, s.center.z + d.z, s.center.x, s.center.y, s.center.z, animate);
+    if ('isOrthographicCamera' in cam) void c.fitToSphere(s, animate);
+  },
+  /** Point on the ground plane under the middle of the view, snapped to a 5 mm grid. */
+  groundPointAtCenter(): Vec3 {
+    const cam = getCamera();
+    if (!cam) return [0, 0, 0];
+    const ray = new Raycaster();
+    ray.setFromCamera(new Vector2(0, 0), cam);
+    const hit = ray.ray.intersectPlane(new Plane(new Vector3(0, 0, 1), 0), new Vector3());
+    if (!hit || hit.length() > 5000) return [0, 0, 0];
+    const snap = (v: number) => Math.round(v / 5) * 5 + 0;
+    return [snap(hit.x), snap(hit.y), 0];
+  },
+  /** Small thumbnail of the current view for the documents list. */
+  capture(): string | null {
+    const src = viewRefs.canvas;
+    if (!src || !src.width) return null;
+    const w = 320;
+    const h = Math.round((w * src.height) / src.width);
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(src, 0, 0, w, h);
+    return c.toDataURL('image/webp', 0.75);
+  },
+};
