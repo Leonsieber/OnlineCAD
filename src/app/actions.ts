@@ -10,9 +10,11 @@ import {
   createPrimitive,
   createShell,
   createTransform,
+  nextName,
 } from '../model/defaults';
+import { removeFeatures } from '../model/docOps';
 import { bracketExample } from '../model/examples';
-import type { BooleanOp, CadDocument, EdgeRef, FaceRef, PrimitiveKind, Vec3 } from '../model/types';
+import type { BooleanOp, CadDocument, EdgeRef, FaceRef, Feature, PrimitiveKind, Vec3 } from '../model/types';
 import { exportParts, type ExportFormat } from '../io/exporters';
 import { download, pickFile, safeFileName } from '../io/files';
 import { IMPORT_ACCEPT, readImport } from '../io/importers';
@@ -98,6 +100,59 @@ export function duplicateSelection() {
   const tf = { ...createTransform(ids, selectionCenter(ids), s.doc.features, true), translate: [10, 10, 0] as Vec3 };
   s.commit((d) => ({ ...d, features: [...d.features.slice(0, d.rollback), tf, ...d.features.slice(d.rollback)], rollback: d.rollback + 1 }));
   s.setSel(ids.map((id) => ({ kind: 'part', part: `${tf.id}:${id}`, index: -1 })));
+}
+
+/**
+ * Tinkercad's Group: solids are united, then parts marked as holes are cut out of the result.
+ * Both steps land in the history as ordinary Union / Subtract features (one undo step).
+ */
+export function groupSelection() {
+  const s = begin();
+  const ids = [...new Set(s.sel.filter((x) => x.kind === 'part').map((x) => x.part))];
+  if (ids.length < 2) return s.toast('Select two or more parts to group (Shift-click to add parts)');
+  const holes = ids.filter((id) => s.doc.parts[id]?.hole);
+  const solids = ids.filter((id) => !s.doc.parts[id]?.hole);
+  if (!solids.length) return s.toast('A group needs at least one solid. Switch one part back to Solid.', 'error');
+  s.commit((d) => {
+    let next = d;
+    const add = (f: Feature) => {
+      const features = [...next.features];
+      features.splice(next.rollback, 0, f);
+      next = { ...next, features, rollback: next.rollback + 1 };
+    };
+    if (solids.length > 1) add({ ...createBoolean('union', solids, [], next.features), name: nextName('Group', next.features) });
+    if (holes.length) add({ ...createBoolean('subtract', solids.slice(0, 1), holes, next.features), name: nextName('Holes', next.features) });
+    return next;
+  });
+  S().setSel([{ kind: 'part', part: solids[0], index: -1 }]);
+}
+
+/** Undo a group: remove the trailing booleans that produced the selected part. */
+export function ungroupSelection() {
+  const s = begin();
+  const id = s.sel.find((x) => x.kind === 'part')?.part;
+  if (!id) return s.toast('Select a group to ungroup');
+  const active = s.doc.features.slice(0, s.doc.rollback);
+  const remove: string[] = [];
+  const freed = new Set<string>();
+  for (let i = active.length - 1; i >= 0; i--) {
+    const f = active[i];
+    if (f.type !== 'boolean') break;
+    const result = f.op === 'subtract' ? f.targets.includes(id) : [...new Set([...f.targets, ...f.tools])][0] === id;
+    if (!result) break;
+    remove.push(f.id);
+    for (const p of [...f.targets, ...f.tools]) freed.add(p);
+  }
+  if (!remove.length) return s.toast("This part isn't a group (or later features depend on it)");
+  s.commit((d) => removeFeatures(d, remove));
+  S().setSel([...freed].map((p) => ({ kind: 'part' as const, part: p, index: -1 })));
+}
+
+export function toggleHole(ids = selectedParts()) {
+  const s = S();
+  if (!ids.length) return;
+  const makeHole = !ids.every((id) => s.doc.parts[id]?.hole);
+  s.commit((d) => ({ ...d, parts: { ...d.parts, ...Object.fromEntries(ids.map((id) => [id, { ...d.parts[id], hole: makeHole }])) } }));
 }
 
 export function deleteSelection() {

@@ -31,16 +31,21 @@ import {
   IconBoxMultiple,
   IconCircleDashed,
   IconSparkles,
+  IconStack2,
+  IconStackPop,
   type Icon,
 } from '@tabler/icons-react';
+import { consumeDragClick, startShapeDrag } from '../app/dragCreate';
 import { PRIMITIVES, PRIMITIVE_ORDER } from '../model/defaults';
 import type { PrimitiveKind } from '../model/types';
 import { useStore, type DisplayMode, type RibbonTab } from '../store/store';
 import { viewApi, type ViewName } from '../viewport/viewApi';
 import {
   addPrimitive,
+  groupSelection,
   hideSelection,
   importFile,
+  ungroupSelection,
   showAllParts,
   startBoolean,
   startEdgeFeature,
@@ -57,9 +62,31 @@ const TABS: { id: RibbonTab; label: string }[] = [
   { id: 'view', label: 'View' },
 ];
 
-function Tool({ icon: I, label, onClick, active, title, small }: { icon: Icon; label: string; onClick: () => void; active?: boolean; title?: string; small?: boolean }) {
+function Tool({
+  icon: I,
+  label,
+  onClick,
+  active,
+  title,
+  small,
+  onPointerDown,
+}: {
+  icon: Icon;
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+  title?: string;
+  small?: boolean;
+  onPointerDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
+}) {
   return (
-    <button type="button" className={`tool${active ? ' on' : ''}${small ? ' small' : ''}`} onClick={onClick} title={title ?? label}>
+    <button
+      type="button"
+      className={`tool${active ? ' on' : ''}${small ? ' small' : ''}${onPointerDown ? ' draggable' : ''}`}
+      onClick={onClick}
+      onPointerDown={onPointerDown}
+      title={title ?? label}
+    >
       <I size={small ? 16 : 21} stroke={1.6} />
       <span>{label}</span>
     </button>
@@ -115,13 +142,23 @@ function SolidTab() {
       <Group label="Sketch">
         <Tool icon={IconPencil} label="Sketch" onClick={() => toast('Sketches with constraints, extrude, and revolve arrive in milestone 2.')} />
       </Group>
-      <Group label="Create">
+      <Group label="Create · drag onto the plate">
         {MAIN_SHAPES.map((k) => (
-          <Tool key={k} icon={PRIMITIVE_ICONS[k]} label={PRIMITIVES[k].label} active={isPrim(k)} onClick={() => addPrimitive(k)} />
+          <Tool
+            key={k}
+            icon={PRIMITIVE_ICONS[k]}
+            label={PRIMITIVES[k].label}
+            active={isPrim(k)}
+            title={`${PRIMITIVES[k].label}: drag it into the view, or click to add it in the middle`}
+            onPointerDown={(e) => startShapeDrag(k, e)}
+            onClick={() => !consumeDragClick() && addPrimitive(k)}
+          />
         ))}
         <MenuTool icon={IconBoxMultiple} label="More" items={more.map((k) => ({ icon: PRIMITIVE_ICONS[k], label: PRIMITIVES[k].label, onSelect: () => addPrimitive(k) }))} />
       </Group>
       <Group label="Combine">
+        <Tool icon={IconStack2} label="Group" onClick={groupSelection} title="Group (Ctrl+G): merge the selected parts; parts marked as holes are cut out" />
+        <Tool icon={IconStackPop} label="Ungroup" onClick={ungroupSelection} title="Ungroup (Ctrl+Shift+G): split a group back into its parts" />
         <Tool icon={IconLayersUnion} label="Union" active={t?.type === 'boolean' && t.op === 'union'} onClick={() => startBoolean('union')} title="Union: merge parts into one" />
         <Tool icon={IconLayersSubtract} label="Subtract" active={t?.type === 'boolean' && t.op === 'subtract'} onClick={() => startBoolean('subtract')} title="Subtract: cut parts away" />
         <Tool icon={IconLayersIntersect} label="Intersect" active={t?.type === 'boolean' && t.op === 'intersect'} onClick={() => startBoolean('intersect')} title="Intersect: keep only the overlap" />

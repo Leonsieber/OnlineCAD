@@ -58,6 +58,7 @@ interface Entry {
 interface Ctx {
   scope: Record<string, number>;
   owned: AnyShape[];
+  warnings: string[];
 }
 
 let entries: Entry[] = [];
@@ -116,7 +117,7 @@ export async function evaluate(req: EvalRequest): Promise<EvalResult> {
       for (let j = i; j < entries.length; j++) freeEntry(entries[j]);
       reusing = false;
     }
-    const ctx: Ctx = { scope, owned: [] };
+    const ctx: Ctx = { scope, owned: [], warnings: [] };
     let status: FeatureStatus;
     let result = state;
     if (f.suppressed) {
@@ -125,7 +126,9 @@ export async function evaluate(req: EvalRequest): Promise<EvalResult> {
       const ft = performance.now();
       try {
         result = await applyFeature(f, state, ctx);
-        status = { state: 'ok', ms: performance.now() - ft };
+        status = ctx.warnings.length
+          ? { state: 'ok', ms: performance.now() - ft, warning: true, message: ctx.warnings.join(' ') }
+          : { state: 'ok', ms: performance.now() - ft };
       } catch (e) {
         for (const s of ctx.owned) safeDelete(s);
         ctx.owned = [];
@@ -165,6 +168,21 @@ export async function evaluate(req: EvalRequest): Promise<EvalResult> {
   for (const k of bboxCache.keys()) if (!keys.has(k)) bboxCache.delete(k);
   sentKeys = keys;
   return { seq: req.seq, parts, meshes, statuses, variables: scope, variableErrors: errors, ms: performance.now() - t0 };
+}
+
+function volumeOf(s: AnyShape): number {
+  try {
+    return measureShape(s).volume;
+  } catch {
+    return 0;
+  }
+}
+
+/** True when two bounding boxes share some volume (merely touching faces doesn't count). */
+function boxesOverlap(a: [Vec3, Vec3], b: [Vec3, Vec3]): boolean {
+  const eps = 1e-6;
+  for (let i = 0; i < 3; i++) if (a[1][i] - eps <= b[0][i] || b[1][i] - eps <= a[0][i]) return false;
+  return true;
 }
 
 function meshBounds(pos: Float32Array): [Vec3, Vec3] {
@@ -234,7 +252,8 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
       }
       const pos = vec(f.placement.position, 'Position');
       const rot = vec(f.placement.rotation, 'Rotation');
-      const shape = transformShape(unwrapSolid(makePrimitive(f.kind, params)), pos, rot, [0, 0, 0]);
+      const stretch = f.placement.scale ? vec(f.placement.scale, 'Stretch') : ([1, 1, 1] as Vec3);
+      const shape = transformShape(unwrapSolid(makePrimitive(f.kind, params, stretch)), pos, rot, [0, 0, 0]);
       next.set(f.id, { id: f.id, kind: 'brep', shape: own(shape), key: newKey(), source: f.id, last: f.id, label: f.name });
       return next;
     }
@@ -249,7 +268,12 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
           let acc: AnyShape = target.shape;
           for (const tool of tools) {
             if (tool.id === target.id) throw new UserError('A part cannot subtract itself');
+            const misses = `"${tool.label}" doesn't overlap "${target.label}", so it cuts nothing. Move it into the part.`;
+            // Cheap check first; then compare volumes, since bounding boxes can overlap while solids don't.
+            const disjoint = !boxesOverlap(boundsOf(acc), boundsOf(tool.shape));
+            const before = disjoint ? 0 : volumeOf(acc);
             const r: AnyShape = (acc as never as { cut(o: AnyShape): AnyShape }).cut(tool.shape);
+            if (disjoint || (before > 0 && Math.abs(before - volumeOf(r)) <= before * 1e-7)) ctx.warnings.push(misses);
             if (acc !== target.shape) safeDelete(acc);
             acc = r;
           }
@@ -317,9 +341,13 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
       const r = vec(f.rotate, 'Rotate');
       const sc = num(f.scale, 'Scale');
       if (!(sc > 0)) throw new UserError('Scale must be greater than 0');
+      const st = f.stretch ? vec(f.stretch, 'Stretch') : ([1, 1, 1] as Vec3);
+      if (!st.every((v) => v > 0)) throw new UserError('Stretch must be greater than 0');
+      const even = Math.abs(st[0] - st[1]) < 1e-9 && Math.abs(st[0] - st[2]) < 1e-9;
       for (const id of f.parts) {
         const p = part(id);
-        const moved = movePart(p, t, r, f.pivot, sc, own);
+        if (p.shape && !even) throw new UserError(`"${p.label}" is a solid that can only scale evenly here. Stretch the shapes it was made from instead.`);
+        const moved = movePart(p, t, r, f.pivot, p.shape ? sc * st[0] : sc, own, st);
         if (f.copy) {
           const cid = `${f.id}:${id}`;
           next.set(cid, { ...moved, id: cid, key: newKey(), source: f.id, last: f.id, label: `${p.label} copy`, inherit: id });
@@ -453,9 +481,17 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
   }
 }
 
-function movePart(p: PartState, t: Vec3, r: Vec3, pivot: Vec3, scale: number, own: (s: AnyShape) => AnyShape): PartState {
+function movePart(
+  p: PartState,
+  t: Vec3,
+  r: Vec3,
+  pivot: Vec3,
+  scale: number,
+  own: (s: AnyShape) => AnyShape,
+  stretch: Vec3 = [1, 1, 1],
+): PartState {
   if (p.shape) return { ...p, shape: own(transformShape(p.shape.clone(), t, r, pivot, scale)) };
-  const m = transformMatrix(t, r, pivot, scale);
+  const m = transformMatrix(t, r, pivot, scale, stretch);
   return { ...p, mesh: { positions: applyMatrix(p.mesh!.positions, m), indices: p.mesh!.indices } };
 }
 

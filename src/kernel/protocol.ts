@@ -1,7 +1,7 @@
 import type { Feature, Variable, Vec3 } from '../model/types';
 
 export const FACE_INFO_STRIDE = 8; // center(3), normal(3), area, surface type
-export const EDGE_INFO_STRIDE = 11; // midpoint(3), start(3), end(3), length, curve type
+export const EDGE_INFO_STRIDE = 14; // midpoint(3), start(3), end(3), length, curve type, face-normal sum(3)
 
 export interface EvalRequest {
   seq: number;
@@ -47,6 +47,8 @@ export interface FeatureStatus {
   message?: string;
   /** The error only means "nothing picked yet". */
   incomplete?: boolean;
+  /** Built fine, but `message` explains something surprising (like a hole that cut nothing). */
+  warning?: boolean;
   ms?: number;
 }
 

@@ -24,8 +24,11 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { EDGE_INFO_STRIDE, FACE_INFO_STRIDE, type MeshData } from '../kernel/protocol';
 import type { EdgeRef, FaceRef, Feature } from '../model/types';
 import { fieldKind, fpDistance, partColor, useStore, type SelItem, type SelKind } from '../store/store';
+import { HandleLayer } from './handles';
 import { liveMove } from './liveMove';
 import { PartView, type PartLook } from './PartView';
+import { ResizeHandles } from './ResizeHandles';
+import { DraftArrows } from './ValueArrows';
 import { cameraEvents, cameraPose, pickables, viewRefs } from './registry';
 import { useSceneColors } from './sceneColors';
 import { bindView, partsBox } from './viewApi';
@@ -45,7 +48,10 @@ export function Scene() {
       <Axes />
       <Parts />
       <Highlights />
+      <HandleLayer />
       <Picker />
+      <ResizeHandles />
+      <DraftArrows />
       <Gizmo />
     </>
   );
@@ -259,6 +265,7 @@ function Parts() {
             edgeColor={colors.edge}
             accent={colors.accent}
             hover={colors.hover}
+            hole={!!doc.parts[p.id]?.hole}
           />
         );
       })}
@@ -313,7 +320,17 @@ function Highlights() {
       if (i >= 0) out.push({ kind: 'face', part: r.part, index: i, mode: 'selected' });
     }
     if (hover && hover.kind !== 'part') out.push({ kind: hover.kind, part: hover.part, index: hover.index, mode: 'hover' });
-    return out.map((it) => ({ it, data: meshOf(it.part) })).filter((x): x is { it: HighlightItem; data: MeshData } => !!x.data);
+    // An edge can be both selected and in the dialog's list; draw it once.
+    const seen = new Set<string>();
+    return out
+      .filter((it) => {
+        const key = `${it.mode}:${it.kind}:${it.part}:${it.index}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((it) => ({ it, data: meshOf(it.part) }))
+      .filter((x): x is { it: HighlightItem; data: MeshData } => !!x.data);
   }, [hover, sel, draft, parts, meshes]);
 
   return (
@@ -503,7 +520,8 @@ function Picker() {
       if (!last) return;
       const filter = activeFilter();
       const s = useStore.getState();
-      s.setHover(filter && !viewRefs.gizmoAxis() ? pickAt(el, camRef.current, last.x, last.y, filter) : null);
+      const blocked = !filter || viewRefs.gizmoAxis() || viewRefs.handleHovered || viewRefs.handleDragging;
+      s.setHover(blocked ? null : pickAt(el, camRef.current, last.x, last.y, filter));
     };
     const onDown = (e: PointerEvent) => {
       down = { x: e.clientX, y: e.clientY, button: e.button };
@@ -521,7 +539,7 @@ function Picker() {
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
       const button = down.button;
       down = null;
-      if (moved > 5) return;
+      if (moved > 5 || viewRefs.handleDragging) return;
       const s = useStore.getState();
       if (button === 0) {
         if (viewRefs.gizmoAxis() || viewRefs.gizmoDragging) return;
@@ -545,6 +563,17 @@ function Picker() {
       useStore.getState().setHover(null);
     };
     const onCtx = (e: Event) => e.preventDefault();
+    // Double-click a part to edit the shape (or the last feature) that made it.
+    const onDbl = (e: MouseEvent) => {
+      const s = useStore.getState();
+      if (s.draft) return;
+      const item = pickAt(el, camRef.current, e.clientX, e.clientY, 'part');
+      const p = item && s.parts.find((x) => x.id === item.part);
+      if (!p) return;
+      const own = s.doc.features.find((f) => f.id === p.id && f.type === 'primitive');
+      s.editFeature(own ? own.id : p.last);
+    };
+    el.addEventListener('dblclick', onDbl);
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
@@ -556,6 +585,7 @@ function Picker() {
       el.removeEventListener('pointerup', onUp);
       el.removeEventListener('pointerleave', onLeave);
       el.removeEventListener('contextmenu', onCtx);
+      el.removeEventListener('dblclick', onDbl);
       if (raf) cancelAnimationFrame(raf);
     };
   }, [gl]);
@@ -603,7 +633,7 @@ function Gizmo() {
     };
   }, []);
 
-  if (!center || !ids.length) return null;
+  if (!center || !ids.length || mode === 'handles') return null;
   const delta = () => proxy.matrixWorld.clone().multiply(start.current.clone().invert());
   return (
     <>

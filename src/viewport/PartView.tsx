@@ -20,7 +20,11 @@ interface Props {
   edgeColor: string;
   accent: string;
   hover: string;
+  /** Tinkercad-style hole: drawn as see-through gray glass. */
+  hole?: boolean;
 }
+
+const HOLE_COLOR = '#9aa3b4';
 
 export function buildGeometry(data: MeshData): BufferGeometry {
   const g = new BufferGeometry();
@@ -35,7 +39,7 @@ export function buildGeometry(data: MeshData): BufferGeometry {
   return g;
 }
 
-export function PartView({ id, data, color, display, look, edgeColor, accent, hover }: Props) {
+export function PartView({ id, data, color, display, look, edgeColor, accent, hover, hole = false }: Props) {
   const invalidate = useThree((s) => s.invalidate);
   const group = useRef<Group>(null!);
   const meshRef = useRef<Mesh>(null!);
@@ -87,23 +91,23 @@ export function PartView({ id, data, color, display, look, edgeColor, accent, ho
   useEffect(() => () => material.dispose(), [material]);
 
   useEffect(() => {
-    material.color.set(color);
+    material.color.set(hole ? HOLE_COLOR : color);
     material.emissive.set(look === 'none' ? '#000000' : look === 'hover' ? hover : accent);
     material.emissiveIntensity = look === 'selected' ? 0.28 : look === 'hover' ? 0.16 : 0;
-    const xray = display === 'xray';
+    const see = display === 'xray' || hole;
     const wire = display === 'wireframe';
-    material.transparent = xray;
-    material.opacity = xray ? 0.28 : 1;
-    material.depthWrite = !xray && !wire;
+    material.transparent = see;
+    material.opacity = hole ? 0.32 : see ? 0.28 : 1;
+    material.depthWrite = !see && !wire;
     material.colorWrite = !wire;
     material.needsUpdate = true;
     if (edges) {
       const m = edges.material as LineMaterial;
-      m.color.set(look === 'selected' ? accent : look === 'hover' ? hover : edgeColor);
+      m.color.set(look === 'selected' ? accent : look === 'hover' ? hover : hole ? HOLE_COLOR : edgeColor);
       m.linewidth = look === 'none' ? 1.15 : 2;
     }
     invalidate();
-  }, [material, edges, color, look, display, edgeColor, accent, hover, invalidate]);
+  }, [material, edges, color, look, display, edgeColor, accent, hover, hole, invalidate]);
 
   useEffect(() => {
     pickables.set(id, { partId: id, mesh: meshRef.current, data });

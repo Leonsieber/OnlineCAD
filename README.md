@@ -19,6 +19,11 @@ Then open http://localhost:5173. `npm run build` makes a static site in `dist/` 
 - Feature history with edit, rename, suppress, delete, and a draggable rollback bar; timeline replay
 - Variables and formulas in every number field (`width / 2`, `1 in`, `sin(30)`)
 - Picking parts, faces, or edges with hover highlights; size, volume, area, and weight readouts
+- Tinkercad-style editing: drag shapes from the ribbon onto the plate (or onto a face), resize handles
+  with editable sizes, a lift cone, a rotate dot, drag a selected part to move it, Hole/Solid and Group (Ctrl+G)
+- Drag arrows on fillets, chamfers, and shells (Onshape/Shapr3D style)
+- Resizing stretches shapes exactly (cylinders become elliptical, spheres become ellipsoids); groups made from
+  shapes stretch by resizing the shapes inside them; imported STEP solids scale evenly
 - Dark, light, and system themes; perspective and orthographic views; four display modes; view cube
 - Import: STEP (as solids), STL, OBJ, PLY, GLB/glTF, 3MF, OFF (as meshes)
 - Export: STEP, STL, 3MF, OBJ, PLY, GLB

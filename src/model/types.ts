@@ -18,10 +18,14 @@ export type PrimitiveKind =
   | 'prism'
   | 'ellipsoid';
 
-/** Rotation is in degrees, applied about world X, then Y, then Z, then the shape is moved to `position`. */
+/**
+ * `scale` stretches the shape along its own axes first (from resize handles; missing means 1, 1, 1).
+ * Rotation is in degrees, applied about world X, then Y, then Z, then the shape is moved to `position`.
+ */
 export interface Placement {
   position: Vec3Expr;
   rotation: Vec3Expr;
+  scale?: Vec3Expr;
 }
 
 /**
@@ -88,6 +92,8 @@ export interface TransformFeature extends FeatureBase {
   rotate: Vec3Expr;
   pivot: Vec3;
   scale: NumExpr;
+  /** Per-axis stretch about the pivot (world axes). Only mesh parts can stretch unevenly. */
+  stretch?: Vec3Expr;
   copy: boolean;
 }
 
@@ -156,6 +162,8 @@ export interface PartProps {
   name?: string;
   color?: string;
   hidden?: boolean;
+  /** Tinkercad-style hole: shown see-through and subtracted when grouped. */
+  hole?: boolean;
 }
 
 export interface Variable {

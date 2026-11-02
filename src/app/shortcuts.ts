@@ -1,6 +1,17 @@
 import { useStore } from '../store/store';
 import { viewApi } from '../viewport/viewApi';
-import { deleteSelection, duplicateSelection, hideSelection, importFile, saveNow, selectAll, selectedParts, showAllParts } from './actions';
+import {
+  deleteSelection,
+  duplicateSelection,
+  groupSelection,
+  hideSelection,
+  importFile,
+  saveNow,
+  selectAll,
+  selectedParts,
+  showAllParts,
+  ungroupSelection,
+} from './actions';
 
 let installed = false;
 
@@ -35,6 +46,10 @@ export function installShortcuts() {
       } else if (key === 'd') {
         e.preventDefault();
         duplicateSelection();
+      } else if (key === 'g') {
+        e.preventDefault();
+        if (e.shiftKey) ungroupSelection();
+        else groupSelection();
       } else if (key === 'a') {
         e.preventDefault();
         selectAll();
@@ -67,6 +82,9 @@ export function installShortcuts() {
       }
       case 'g':
         s.setPref('grid', !s.prefs.grid);
+        break;
+      case 'q':
+        s.setGizmo('handles');
         break;
       case 'w':
         s.setGizmo('translate');

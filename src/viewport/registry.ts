@@ -26,5 +26,8 @@ export const viewRefs: {
   /** The gizmo's hovered handle ("X", "XY", ...) or null; clicks on a handle must not select. */
   gizmoAxis: () => string | null;
   gizmoDragging: boolean;
+  /** A resize handle, arrow, or part body is being dragged (or the pointer is over a handle). */
+  handleDragging: boolean;
+  handleHovered: boolean;
   canvas: HTMLCanvasElement | null;
-} = { controls: null, camera: null, gizmoAxis: () => null, gizmoDragging: false, canvas: null };
+} = { controls: null, camera: null, gizmoAxis: () => null, gizmoDragging: false, handleDragging: false, handleHovered: false, canvas: null };

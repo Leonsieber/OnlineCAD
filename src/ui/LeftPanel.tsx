@@ -105,7 +105,7 @@ function FeatureList() {
                   data-feature-row
                   className={`row${editing ? ' on' : ''}${rolledBack ? ' rolled' : ''}${f.suppressed ? ' suppressed' : ''}${st?.state === 'error' && !rolledBack ? ' error' : ''}`}
                   onDoubleClick={() => editFeature(f.id)}
-                  title={st?.state === 'error' ? st.message : rolledBack ? 'Rolled back: drag the bar below this to rebuild it' : 'Double-click to edit'}
+                  title={st?.message ?? (rolledBack ? 'Rolled back: drag the bar below this to rebuild it' : 'Double-click to edit')}
                 >
                   <Icon size={15} stroke={1.6} />
                   {renaming === f.id ? (
@@ -120,6 +120,7 @@ function FeatureList() {
                     <span className="row-name">{f.name}</span>
                   )}
                   {st?.state === 'error' && !rolledBack && <IconAlertTriangle size={14} className="row-warn" />}
+                  {st?.warning && !rolledBack && <IconAlertTriangle size={14} className="row-caution" />}
                 </div>
               </ContextMenu.Trigger>
               <ContextMenu.Portal>
@@ -209,6 +210,7 @@ function PartsList() {
                 >
                   <span className="dot" style={{ background: partColor(p.id, { doc, parts }) }} />
                   <span className="row-name">{partName(p.id, { doc, parts })}</span>
+                  {doc.parts[p.id]?.hole && <span className="tag">hole</span>}
                   {p.kind === 'mesh' && <span className="tag">mesh</span>}
                   <button
                     className="row-action"

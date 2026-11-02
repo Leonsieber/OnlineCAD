@@ -1,7 +1,7 @@
-import { Box3, Plane, Raycaster, Sphere, Vector2, Vector3, type Camera } from 'three';
+import { Box3, Plane, Raycaster, Sphere, Vector2, Vector3, type Camera, type Mesh } from 'three';
 import { useStore } from '../store/store';
 import type { Vec3 } from '../model/types';
-import { viewRefs } from './registry';
+import { pickables, viewRefs } from './registry';
 
 export type ViewName = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'iso';
 
@@ -76,6 +76,31 @@ export const viewApi = {
     const snap = (v: number) => Math.round(v / 5) * 5 + 0;
     return [snap(hit.x), snap(hit.y), 0];
   },
+  /**
+   * Where a shape dropped at this screen point should land: on the face under the cursor (with that
+   * face's normal) or on the ground plane. Null when the point is outside the 3D view.
+   */
+  dropAt(clientX: number, clientY: number, exclude?: string): { point: Vec3; normal: Vec3 } | null {
+    const canvas = viewRefs.canvas;
+    const cam = getCamera();
+    if (!canvas || !cam) return null;
+    const r = canvas.getBoundingClientRect();
+    if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return null;
+    const ray = new Raycaster();
+    ray.setFromCamera(new Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), cam);
+    const { doc } = useStore.getState();
+    const meshes = [...pickables.values()].filter((e) => e.partId !== exclude && !doc.parts[e.partId]?.hidden).map((e) => e.mesh as Mesh);
+    const hit = ray.intersectObjects(meshes, false)[0];
+    if (hit?.face) {
+      const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+      if (n.dot(ray.ray.direction) > 0) n.negate();
+      return { point: hit.point.toArray() as Vec3, normal: n.toArray() as Vec3 };
+    }
+    const p = ray.ray.intersectPlane(new Plane(new Vector3(0, 0, 1), 0), new Vector3());
+    if (!p || p.length() > 20000) return null;
+    return { point: p.toArray() as Vec3, normal: [0, 0, 1] };
+  },
+
   /** Small thumbnail of the current view for the documents list. */
   capture(): string | null {
     const src = viewRefs.canvas;

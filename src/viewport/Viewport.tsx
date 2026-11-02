@@ -12,6 +12,7 @@ import {
   IconFocusCentered,
   IconLine,
   IconLoader2,
+  IconResize,
   IconRotate,
   IconSphere,
   IconSquare,
@@ -68,14 +69,19 @@ function Hud() {
       {draft?.field && <div className="hud-note">Click {draft.field === 'edges' ? 'edges' : draft.field === 'faces' ? 'faces' : 'parts'} to add or remove them</div>}
       {showGizmoModes && (
         <div className="hud-group">
-          <button className={gizmo === 'translate' ? 'on' : ''} title="Move (W)" onClick={() => setGizmo('translate')}>
+          <button className={gizmo === 'handles' ? 'on' : ''} title="Resize handles: drag squares to resize, the cone to lift, the dot to spin (Q)" onClick={() => setGizmo('handles')}>
+            <IconResize size={15} stroke={1.7} />
+            <span>Handles</span>
+          </button>
+          <button className={gizmo === 'translate' ? 'on' : ''} title="Move arrows (W)" onClick={() => setGizmo('translate')}>
             <IconArrowsMove size={15} stroke={1.7} />
           </button>
-          <button className={gizmo === 'rotate' ? 'on' : ''} title="Rotate (E)" onClick={() => setGizmo('rotate')}>
+          <button className={gizmo === 'rotate' ? 'on' : ''} title="Rotate rings (E)" onClick={() => setGizmo('rotate')}>
             <IconRotate size={15} stroke={1.7} />
           </button>
         </div>
       )}
+      {showGizmoModes && gizmo === 'handles' && <div className="hud-tip">Drag the part to move it · Shift keeps proportions</div>}
       <div className="hud-group">
         <button title="Fit all (F)" onClick={() => viewApi.fitAll()}>
           <IconFocusCentered size={15} stroke={1.7} />

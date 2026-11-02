@@ -15,6 +15,7 @@ import { evalNum } from '../model/expr';
 import { hashString, newId } from '../model/hash';
 import type { CadDocument, EdgeRef, FaceRef, Feature, PartProps, Placement, TransformFeature, Vec3 } from '../model/types';
 import { liveMove } from '../viewport/liveMove';
+import { applyResize } from './resize';
 
 export type SelKind = 'part' | 'face' | 'edge';
 export interface SelItem {
@@ -29,6 +30,7 @@ export type ThemePref = 'dark' | 'light' | 'system';
 export type Projection = 'perspective' | 'orthographic';
 export type RibbonTab = 'solid' | 'sketch' | 'mesh' | 'inspect' | 'view';
 export type ModalName = 'documents' | 'shortcuts' | 'about' | null;
+export type GizmoMode = 'handles' | 'translate' | 'rotate';
 
 export interface Draft {
   feature: Feature;
@@ -78,6 +80,7 @@ export const fieldKind = (key: string | null): SelKind | null =>
 
 const MAX_UNDO = 200;
 let toastSeq = 0;
+let evenHintShown = false;
 
 export interface State {
   doc: CadDocument;
@@ -101,7 +104,8 @@ export interface State {
   resolvedTheme: 'dark' | 'light';
   filter: SelKind;
   tab: RibbonTab;
-  gizmo: 'translate' | 'rotate';
+  /** handles = Tinkercad resize handles; translate/rotate = arrow and ring gizmo. */
+  gizmo: GizmoMode;
   modal: ModalName;
   ctxMenu: { x: number; y: number; part: string | null } | null;
   toasts: Toast[];
@@ -133,6 +137,7 @@ export interface State {
   setPartProps(id: string, patch: PartProps): void;
   deleteParts(ids: string[]): void;
   commitMove(ids: string[], delta: Matrix4, pivot: Vec3): void;
+  commitResize(ids: string[], frameQuat: Quaternion, stretch: Vec3, anchor: Vec3, evenFactor: number): void;
 
   select(item: SelItem | null, additive?: boolean): void;
   setSel(items: SelItem[]): void;
@@ -142,7 +147,7 @@ export interface State {
   setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): void;
   setFilter(f: SelKind): void;
   setTab(t: RibbonTab): void;
-  setGizmo(m: 'translate' | 'rotate'): void;
+  setGizmo(m: GizmoMode): void;
   setModal(m: ModalName): void;
   setCtxMenu(m: State['ctxMenu']): void;
 
@@ -172,7 +177,7 @@ export const useStore = create<State>()((set, get) => ({
   resolvedTheme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
   filter: 'part',
   tab: 'solid',
-  gizmo: 'translate',
+  gizmo: 'handles',
   modal: null,
   ctxMenu: null,
   toasts: [],
@@ -345,6 +350,29 @@ export const useStore = create<State>()((set, get) => ({
     const { translate, rotate } = deltaToTransform(delta, new Vector3(...pivot));
     s.commit((d) => insertFeature(d, { ...tf, translate, rotate }));
     finish();
+  },
+
+  commitResize(ids, frameQuat, stretch, anchor, evenFactor) {
+    const s = get();
+    if (stretch.every((v) => Math.abs(v - 1) < 1e-9) && Math.abs(evenFactor - 1) < 1e-9) return liveMove.clear();
+    let doc = s.doc;
+    if (s.draft?.feature.type === 'primitive') {
+      // Resizing the shape being created: fold the stretch into the dialog's draft instead.
+      const draftDoc = s.draft.isNew ? insertFeature(doc, s.draft.feature, s.draft.index) : replaceFeature(doc, s.draft.feature);
+      const r = applyResize(draftDoc, ids, s.parts, frameQuat, stretch, anchor, evenFactor, s.varValues, (p, pv) => createTransform(p, pv, doc.features));
+      const updated = r?.doc.features.find((f) => f.id === s.draft!.feature.id);
+      if (updated) set({ draft: { ...s.draft, feature: updated } });
+      return liveMove.hold(currentSeq());
+    }
+    const r = applyResize(doc, ids, s.parts, frameQuat, stretch, anchor, evenFactor, s.varValues, (p, pv) => createTransform(p, pv, doc.features));
+    if (!r) return liveMove.clear();
+    doc = r.doc;
+    s.commit(() => doc);
+    liveMove.hold(currentSeq());
+    if (r.even.length && !evenHintShown) {
+      evenHintShown = true;
+      s.toast('Imported solids and copies scale evenly. Shapes, and groups made from shapes, can stretch along one axis.');
+    }
   },
 
   select(item, additive = false) {
@@ -521,6 +549,12 @@ function mergeTransform(f: TransformFeature, delta: Matrix4, scope: Record<strin
   const t = evalVec(f.translate, scope);
   const r = evalVec(f.rotate, scope);
   if (!t || !r) return null;
+  // A rotation on top of an uneven stretch would need a shear, which a transform can't express.
+  const st = f.stretch ? evalVec(f.stretch, scope) : [1, 1, 1];
+  const uneven = !st || st.some((v) => Math.abs(v - st[0]) > 1e-9);
+  const q0 = new Quaternion();
+  delta.decompose(new Vector3(), q0, new Vector3());
+  if (uneven && q0.angleTo(new Quaternion()) > 1e-9) return null;
   const p = new Vector3(...f.pivot);
   const q = new Quaternion().setFromEuler(new Euler(r[0] * D2R, r[1] * D2R, r[2] * D2R, 'ZYX'));
   // Existing rigid part of the feature: x -> R(x - p) + p + t  (scale about p is left untouched)

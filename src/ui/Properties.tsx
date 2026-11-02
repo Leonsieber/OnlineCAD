@@ -15,6 +15,9 @@ import {
   IconTrash,
   IconX,
   IconCheck,
+  IconCircleDashed,
+  IconStack2,
+  IconStackPop,
 } from '@tabler/icons-react';
 import { kernel } from '../kernel/client';
 import { EDGE_INFO_STRIDE, FACE_INFO_STRIDE, type MeasureResult } from '../kernel/protocol';
@@ -22,7 +25,16 @@ import { BOOLEAN_LABELS, PART_COLORS, PRIMITIVES, featureLabel } from '../model/
 import { evalNum, formatNum } from '../model/expr';
 import type { EdgeRef, FaceRef, Feature, NumExpr } from '../model/types';
 import { meshOf, partColor, partName, useStore, type Draft } from '../store/store';
-import { deleteSelection, duplicateSelection, startBoolean, startEdgeFeature, startShell, exportAs } from '../app/actions';
+import {
+  deleteSelection,
+  duplicateSelection,
+  exportAs,
+  groupSelection,
+  startBoolean,
+  startEdgeFeature,
+  startShell,
+  ungroupSelection,
+} from '../app/actions';
 import { Field, NumInput, RefField, Segmented, Switch, Vec3Input, type Chip } from './controls';
 import { featureIcon } from './icons';
 
@@ -71,6 +83,12 @@ function FeatureDialog({ draft }: { draft: Draft }) {
       <div className="props-sub">{draft.isNew ? `New ${featureLabel(f).toLowerCase()}` : `Editing ${featureLabel(f).toLowerCase()}`}</div>
       <div className="props-body">
         <FeatureFields draft={draft} set={set} />
+        {status?.warning && (
+          <div className="banner caution">
+            <IconAlertTriangle size={16} />
+            <span>{status.message}</span>
+          </div>
+        )}
         {status?.state === 'error' && (
           <div className={`banner ${status.incomplete ? 'info' : 'error'}`}>
             {status.incomplete ? <IconInfoCircle size={16} /> : <IconAlertTriangle size={16} />}
@@ -163,7 +181,12 @@ function FeatureFields({ draft, set }: { draft: Draft; set: (p: Partial<Feature>
           <Field label="Rotation">
             <Vec3Input value={f.placement.rotation} unit="°" step={15} onChange={(rotation) => set({ placement: { ...f.placement, rotation } } as Partial<Feature>)} />
           </Field>
-          <p className="hint">Drag the arrows in the view to move it. Fields take formulas like 20*2 or 1 in.</p>
+          {f.placement.scale && (
+            <Field label="Stretch">
+              <Vec3Input value={f.placement.scale} unit="×" step={0.1} onChange={(scale) => set({ placement: { ...f.placement, scale } } as Partial<Feature>)} />
+            </Field>
+          )}
+          <p className="hint">Drag the white squares in the view to resize, the cone to lift it. Fields take formulas like 20*2 or 1 in.</p>
         </>
       );
     }
@@ -337,6 +360,9 @@ function SelectionInfo() {
       </p>
       {kinds.has('part') && ids.length >= 2 && (
         <div className="action-grid">
+          <button className="btn primary" onClick={groupSelection} title="Ctrl+G">
+            <IconStack2 size={15} /> Group
+          </button>
           <button className="btn" onClick={() => startBoolean('union')}>
             <IconLayersUnion size={15} /> Union
           </button>
@@ -414,6 +440,15 @@ function PartInfo({ id }: { id: string }) {
         </button>
       }
     >
+      <Segmented
+        value={doc.parts[id]?.hole ? 'hole' : 'solid'}
+        options={[
+          { value: 'solid', label: 'Solid', icon: <span className="swatch-sm" style={{ background: color }} /> },
+          { value: 'hole', label: 'Hole', icon: <IconCircleDashed size={14} /> },
+        ]}
+        onChange={(v) => setProps(id, { hole: v === 'hole' })}
+      />
+      {doc.parts[id]?.hole && <p className="hint">Holes are cut out of the solids you group them with (Ctrl+G).</p>}
       <div className="section-label">Color</div>
       <div className="swatches">
         {PART_COLORS.map((c) => (
@@ -444,6 +479,9 @@ function PartInfo({ id }: { id: string }) {
         </p>
       )}
       <div className="action-grid">
+        <button className="btn" onClick={ungroupSelection} title="Ctrl+Shift+G: split a group back into its parts">
+          <IconStackPop size={15} /> Ungroup
+        </button>
         <button className="btn" onClick={duplicateSelection}>
           <IconCopy size={15} /> Duplicate
         </button>

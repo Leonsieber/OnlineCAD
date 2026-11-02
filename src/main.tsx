@@ -24,8 +24,19 @@ if (import.meta.env.DEV) {
     import('./io/importers'),
     import('./kernel/client'),
     import('three'),
-  ]).then(([store, actions, exporters, importers, client, three]) => {
-    (window as unknown as Record<string, unknown>).__oc = { ...store, actions, exporters, importers, kernel: client.kernel, THREE: three };
+    import('./viewport/viewApi'),
+    import('./viewport/registry'),
+  ]).then(([store, actions, exporters, importers, client, three, view, registry]) => {
+    (window as unknown as Record<string, unknown>).__oc = {
+      ...store,
+      actions,
+      exporters,
+      importers,
+      kernel: client.kernel,
+      THREE: three,
+      viewApi: view.viewApi,
+      viewRefs: registry.viewRefs,
+    };
   });
 }
 
