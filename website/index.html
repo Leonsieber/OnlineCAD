@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OnlineCAD · Free 3D CAD for everyone</title>
+    <meta name="description" content="Free 3D CAD that is as easy as Tinkercad and as precise as Onshape. Sketch, extrude, sculpt, generate parts with AI, and print. In your browser or on your desktop." />
+    <meta property="og:title" content="OnlineCAD · Free 3D CAD for everyone" />
+    <meta property="og:description" content="Sketch, extrude, sculpt, generate parts with AI, and print. Free, in your browser or on your desktop." />
+    <meta property="og:image" content="assets/app-bracket.png" />
+    <meta name="theme-color" content="#09090b" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #09090b;
+        --panel: #111113;
+        --panel-2: #18181b;
+        --line: #27272a;
+        --line-2: #3f3f46;
+        --text: #fafafa;
+        --text-2: #a1a1aa;
+        --text-3: #71717a;
+        --accent: #6f9cff;
+        --radius: 22px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.6 Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      img {
+        display: block;
+        max-width: 100%;
+      }
+      .wrap {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        font-family: 'Space Grotesk', Inter, sans-serif;
+        font-weight: 600;
+        letter-spacing: -0.035em;
+        line-height: 1.02;
+      }
+      h2 {
+        font-size: clamp(32px, 5vw, 54px);
+      }
+      h3 {
+        font-size: 20px;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+      }
+      p {
+        margin: 0;
+      }
+      .muted {
+        color: var(--text-2);
+      }
+
+      /* ---------- buttons */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        height: 46px;
+        padding: 0 20px;
+        border-radius: 12px;
+        font-weight: 600;
+        font-size: 15px;
+        transition: transform 0.15s, background 0.15s, border-color 0.15s;
+        white-space: nowrap;
+      }
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+      .btn.white {
+        background: var(--text);
+        color: #09090b;
+      }
+      .btn.white:hover {
+        background: #fff;
+      }
+      .btn.ghost {
+        border: 1px solid var(--line-2);
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .btn.ghost:hover {
+        border-color: #71717a;
+      }
+      .btn.sm {
+        height: 36px;
+        padding: 0 14px;
+        border-radius: 10px;
+        font-size: 13.5px;
+      }
+      .btn svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      /* ---------- nav */
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: color-mix(in srgb, var(--bg) 82%, transparent);
+        backdrop-filter: blur(12px);
+      }
+      .nav-in {
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        height: 64px;
+      }
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: -0.02em;
+      }
+      .logo img {
+        width: 26px;
+        height: 26px;
+      }
+      .nav-links {
+        display: flex;
+        gap: 26px;
+        margin: 0 auto;
+        color: var(--text-2);
+        font-size: 14px;
+      }
+      .nav-links a:hover {
+        color: var(--text);
+      }
+      .nav-cta {
+        display: flex;
+        gap: 10px;
+      }
+
+      /* ---------- hero */
+      .hero {
+        position: relative;
+        margin-top: 8px;
+        min-height: min(720px, 86vh);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        padding: 48px 20px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: radial-gradient(ellipse at 50% 40%, #121218 0%, #09090b 70%);
+        text-align: center;
+        isolation: isolate;
+      }
+      #dots {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: -1;
+      }
+      .hero::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background: radial-gradient(ellipse at 50% 50%, rgba(9, 9, 11, 0.35) 0%, rgba(9, 9, 11, 0.1) 40%, rgba(9, 9, 11, 0.8) 85%);
+        pointer-events: none;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 26px;
+        padding: 6px 14px;
+        border: 1px solid var(--line-2);
+        border-radius: 999px;
+        background: rgba(24, 24, 27, 0.7);
+        color: var(--text-2);
+        font-size: 13px;
+      }
+      .pill b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .hero h1,
+      .hero .lead {
+        text-shadow: 0 2px 24px rgba(9, 9, 11, 0.9), 0 0 2px rgba(9, 9, 11, 0.8);
+      }
+      .hero h1 {
+        font-size: clamp(46px, 8.4vw, 104px);
+        max-width: 11ch;
+      }
+      .hero .lead {
+        max-width: 560px;
+        margin: 24px auto 34px;
+        color: #d4d4d8;
+        font-size: clamp(16px, 2vw, 19px);
+      }
+      .hero-cta {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px;
+      }
+      .hero .fine {
+        margin-top: 16px;
+        color: var(--text-3);
+        font-size: 13px;
+      }
+
+      /* ---------- screenshot */
+      .shot {
+        position: relative;
+        margin: 72px auto 0;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, #16161a, #0d0d10);
+      }
+      .shot::before {
+        content: '';
+        position: absolute;
+        inset: -1px;
+        z-index: -1;
+        border-radius: var(--radius);
+        background: radial-gradient(ellipse at 50% 0%, rgba(111, 156, 255, 0.35), transparent 60%);
+        filter: blur(40px);
+      }
+      .shot img {
+        border-radius: 14px;
+        border: 1px solid var(--line);
+      }
+
+      /* ---------- sections */
+      section {
+        padding: 120px 0 0;
+      }
+      .eyebrow {
+        margin-bottom: 14px;
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .head {
+        max-width: 720px;
+        margin-bottom: 48px;
+      }
+      .head p {
+        margin-top: 18px;
+        color: var(--text-2);
+        font-size: 17px;
+      }
+
+      .three {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+      .card {
+        padding: 28px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        transition: border-color 0.2s, transform 0.2s;
+      }
+      .card:hover {
+        border-color: var(--line-2);
+        transform: translateY(-2px);
+      }
+      .card .tag {
+        display: inline-block;
+        margin-bottom: 18px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: var(--panel-2);
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .card p {
+        margin-top: 10px;
+        color: var(--text-2);
+      }
+      .card ul {
+        margin: 16px 0 0;
+        padding: 0;
+        list-style: none;
+        color: #d4d4d8;
+        font-size: 14px;
+      }
+      .card li {
+        padding: 6px 0;
+        border-top: 1px solid var(--line);
+      }
+      .glyph {
+        width: 100%;
+        height: 140px;
+        margin-bottom: 20px;
+        border-radius: 12px;
+        background: var(--panel-2);
+      }
+
+      /* ---------- AI */
+      .ai {
+        display: grid;
+        grid-template-columns: 1fr 1.1fr;
+        gap: 48px;
+        align-items: center;
+      }
+      .ai ul {
+        margin: 26px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .ai li {
+        display: flex;
+        gap: 12px;
+        padding: 10px 0;
+        color: #d4d4d8;
+      }
+      .ai li span {
+        color: var(--accent);
+      }
+      .console {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+        font-size: 13.5px;
+      }
+      .console-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        color: var(--text-2);
+      }
+      .console-top i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--line-2);
+      }
+      .prompt {
+        margin: 18px;
+        padding: 14px 16px;
+        border: 1px solid var(--line-2);
+        border-radius: 12px;
+        background: #0c0c0f;
+        min-height: 52px;
+      }
+      .caret {
+        display: inline-block;
+        width: 8px;
+        height: 17px;
+        margin-left: 2px;
+        vertical-align: -3px;
+        background: var(--accent);
+        animation: blink 1s steps(2) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .params {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0 18px 14px;
+      }
+      .params span {
+        padding: 4px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: #d4d4d8;
+        font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+        font-size: 12.5px;
+        opacity: 0;
+        transform: translateY(4px);
+        transition: opacity 0.4s, transform 0.4s;
+      }
+      .params.on span {
+        opacity: 1;
+        transform: none;
+      }
+      pre {
+        margin: 0;
+        padding: 18px;
+        border-top: 1px solid var(--line);
+        background: #0c0c0f;
+        color: #c9d1d9;
+        font: 12.5px/1.65 ui-monospace, 'Cascadia Code', Consolas, monospace;
+        overflow-x: auto;
+      }
+      .k {
+        color: #ff7b72;
+      }
+      .f {
+        color: #d2a8ff;
+      }
+      .n {
+        color: #79c0ff;
+      }
+      .c {
+        color: #6e7681;
+      }
+
+      /* ---------- feature grid */
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+      }
+      .grid div {
+        padding: 26px 24px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .grid div:nth-child(4n) {
+        border-right: 0;
+      }
+      .grid div:nth-last-child(-n + 4) {
+        border-bottom: 0;
+      }
+      .grid h3 {
+        font-size: 17px;
+      }
+      .grid p {
+        margin-top: 8px;
+        color: var(--text-2);
+        font-size: 14px;
+      }
+      .formats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 28px;
+      }
+      .formats span {
+        padding: 6px 14px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--text-2);
+        font-size: 13px;
+        font-family: ui-monospace, Consolas, monospace;
+      }
+
+      /* ---------- themes */
+      .duo {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .duo figure {
+        margin: 0;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--panel);
+      }
+      .duo img {
+        border-radius: 12px;
+      }
+      .duo figcaption {
+        padding: 12px 6px 4px;
+        color: var(--text-2);
+        font-size: 14px;
+      }
+
+      /* ---------- download */
+      .download {
+        padding: 64px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: radial-gradient(ellipse at 50% 0%, #151a28 0%, var(--panel) 65%);
+        text-align: center;
+      }
+      .download h2 {
+        margin-bottom: 14px;
+      }
+      .platforms {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 40px;
+        text-align: left;
+      }
+      .platform {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(9, 9, 11, 0.6);
+        transition: border-color 0.15s, transform 0.15s;
+      }
+      .platform:hover {
+        border-color: #71717a;
+        transform: translateY(-2px);
+      }
+      .platform.mine {
+        border-color: var(--text);
+      }
+      .platform strong {
+        font-size: 16px;
+      }
+      .platform span {
+        color: var(--text-3);
+        font-size: 13px;
+      }
+      .platform em {
+        margin-top: 12px;
+        color: var(--text);
+        font-style: normal;
+        font-weight: 600;
+        font-size: 14px;
+      }
+
+      footer {
+        margin-top: 120px;
+        padding: 36px 0 48px;
+        border-top: 1px solid var(--line);
+        color: var(--text-3);
+        font-size: 14px;
+      }
+      .foot {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .foot nav {
+        position: static;
+        display: flex;
+        gap: 22px;
+        background: none;
+        backdrop-filter: none;
+      }
+      .foot a:hover {
+        color: var(--text);
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(18px);
+        transition: opacity 0.7s ease, transform 0.7s ease;
+      }
+      .reveal.in {
+        opacity: 1;
+        transform: none;
+      }
+
+      @media (max-width: 900px) {
+        .nav-links {
+          display: none;
+        }
+        .nav-cta .ghost {
+          display: none;
+        }
+        .three,
+        .ai,
+        .duo {
+          grid-template-columns: 1fr;
+        }
+        .grid,
+        .platforms {
+          grid-template-columns: 1fr 1fr;
+        }
+        .grid div:nth-child(4n) {
+          border-right: 1px solid var(--line);
+        }
+        .grid div:nth-child(2n) {
+          border-right: 0;
+        }
+        .grid div:nth-last-child(-n + 4) {
+          border-bottom: 1px solid var(--line);
+        }
+        .grid div:nth-last-child(-n + 2) {
+          border-bottom: 0;
+        }
+        .download {
+          padding: 40px 20px;
+        }
+        section {
+          padding-top: 88px;
+        }
+      }
+      @media (max-width: 520px) {
+        .grid,
+        .platforms {
+          grid-template-columns: 1fr;
+        }
+        .grid div {
+          border-right: 0 !important;
+          border-bottom: 1px solid var(--line) !important;
+        }
+        .grid div:last-child {
+          border-bottom: 0 !important;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .reveal {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div class="wrap nav-in">
+        <a class="logo" href="#"><img src="favicon.svg" alt="" />OnlineCAD</a>
+        <div class="nav-links">
+          <a href="#tools">Features</a>
+          <a href="#ai">AI</a>
+          <a href="#download">Download</a>
+          <a data-repo href="#">GitHub</a>
+        </div>
+        <div class="nav-cta">
+          <a class="btn sm ghost" data-app href="#">Open in browser</a>
+          <a class="btn sm white" href="#download">Download →</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="wrap">
+      <header class="hero">
+        <canvas id="dots" aria-hidden="true"></canvas>
+        <div class="pill"><b>New</b> Describe a part, AI models it</div>
+        <h1>Design anything in 3D</h1>
+        <p class="lead">Free CAD that's as easy as Tinkercad and as precise as Onshape. Shape it, sketch it, sculpt it, print it. In your browser or on your desktop.</p>
+        <div class="hero-cta">
+          <a class="btn white" data-primary href="#download">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 13 7.5 1.1v-7H3v5.9Zm8.4 1.2L21 21v-8.4h-9.6v7.1Zm0-15.4v7.2H21V3l-9.6 1.3Z" /></svg>
+            <span>Download for Windows</span>
+          </a>
+          <a class="btn ghost" data-app href="#">Open in browser →</a>
+        </div>
+        <p class="fine" data-fine>Windows 10+ · x64 · Free · No account needed</p>
+      </header>
+
+      <div class="shot reveal">
+        <img src="assets/app-bracket.png" alt="OnlineCAD with a mounting bracket: the feature history on the left, the 3D view in the middle, and properties on the right" width="1584" height="935" />
+      </div>
+
+      <section id="tools">
+        <div class="head reveal">
+          <div class="eyebrow">Three tools in one</div>
+          <h2>Simple when you start. Precise when you need it.</h2>
+          <p>Drag shapes like Tinkercad, sketch with constraints like Onshape, and sculpt like Blender, all in one history you can change at any time.</p>
+        </div>
+        <div class="three">
+          <article class="card reveal">
+            <canvas class="glyph" data-glyph="shapes" aria-hidden="true"></canvas>
+            <span class="tag">Like Tinkercad</span>
+            <h3>Drag, drop, done</h3>
+            <p>Pull shapes onto the plate, resize them with handles, and turn them with the protractor.</p>
+            <ul>
+              <li>Holes and groups cut in one click</li>
+              <li>Arrow keys nudge, D drops onto the plate</li>
+              <li>Parts library: bolts, gears, springs, boxes</li>
+            </ul>
+          </article>
+          <article class="card reveal">
+            <canvas class="glyph" data-glyph="sketch" aria-hidden="true"></canvas>
+            <span class="tag">Like Onshape</span>
+            <h3>Sketch with real constraints</h3>
+            <p>Draw on any plane or face, add dimensions that take formulas, and see when it's fully defined.</p>
+            <ul>
+              <li>Extrude, cut, revolve, sweep, loft</li>
+              <li>Fillets and chamfers with drag arrows</li>
+              <li>Variables like <code>width / 2</code> in every field</li>
+            </ul>
+          </article>
+          <article class="card reveal">
+            <canvas class="glyph" data-glyph="sculpt" aria-hidden="true"></canvas>
+            <span class="tag">Like Blender</span>
+            <h3>Sculpt and shade</h3>
+            <p>Turn any part into a mesh, subdivide it, and shape it with brushes. Then make it look real.</p>
+            <ul>
+              <li>Inflate, smooth, flatten, grab</li>
+              <li>18 materials, from PLA to gold and glass</li>
+              <li>Realistic view and image export</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="ai">
+        <div class="ai">
+          <div class="reveal">
+            <div class="eyebrow">AI part generation</div>
+            <h2>Describe it. Get a part you can edit.</h2>
+            <p class="muted" style="margin-top: 18px; font-size: 17px">
+              The AI doesn't hand you a frozen mesh. It writes a parametric model with sizes you can change, and if its first try fails, it fixes its own mistake.
+            </p>
+            <ul>
+              <li><span>→</span>Claude, GPT, Gemini, and Llama, or a free local model with Ollama</li>
+              <li><span>→</span>Ask for changes: "make it 20% taller and add a slot"</li>
+              <li><span>→</span>Your key stays in your browser</li>
+            </ul>
+          </div>
+          <div class="console reveal" aria-label="Example of generating a part with AI">
+            <div class="console-top"><i></i><i></i><i></i>&nbsp; Generate a part with AI</div>
+            <div class="prompt"><span id="typed"></span><span class="caret"></span></div>
+            <div class="params" id="params"><span>width = 70</span><span>angle = 65°</span><span>slot = 14</span></div>
+            <pre><code><span class="k">const</span> base = cad.<span class="f">box</span>(p.width, <span class="n">60</span>, <span class="n">6</span>);
+<span class="k">const</span> back = cad.<span class="f">turn</span>(cad.<span class="f">box</span>(p.width, <span class="n">6</span>, <span class="n">80</span>), <span class="n">90</span> - p.angle, [<span class="n">1</span>, <span class="n">0</span>, <span class="n">0</span>]);
+<span class="k">const</span> lip = cad.<span class="f">move</span>(cad.<span class="f">box</span>(p.width, <span class="n">6</span>, <span class="n">14</span>), <span class="n">0</span>, -<span class="n">27</span>, <span class="n">4</span>);
+<span class="c">// cut a slot for the charging cable</span>
+<span class="k">const</span> slot = cad.<span class="f">move</span>(cad.<span class="f">box</span>(p.slot, <span class="n">70</span>, <span class="n">20</span>), <span class="n">0</span>, <span class="n">0</span>, -<span class="n">1</span>);
+<span class="k">return</span> cad.<span class="f">subtract</span>(cad.<span class="f">union</span>(base, back, lip), slot);</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="head reveal">
+          <div class="eyebrow">Everything you need</div>
+          <h2>From first idea to finished print.</h2>
+        </div>
+        <div class="grid reveal">
+          <div><h3>Feature history</h3><p>Every step stays editable. Roll back, reorder, suppress.</p></div>
+          <div><h3>Exact geometry</h3><p>OpenCascade, the kernel behind FreeCAD, runs on your machine.</p></div>
+          <div><h3>Measure</h3><p>Click two points. Corners and edge middles snap.</p></div>
+          <div><h3>3D-print check</h3><p>Overhangs in red, build volume, filament and time estimate.</p></div>
+          <div><h3>2D drawings</h3><p>Front, top, side, and iso views with hidden lines, as PDF.</p></div>
+          <div><h3>Scripting</h3><p>Build parts in JavaScript with named parameters.</p></div>
+          <div><h3>Works offline</h3><p>Installable, and your projects are saved as you go.</p></div>
+          <div><h3>Cloud and sharing</h3><p>Sign in with Google or GitHub to sync and share by link.</p></div>
+        </div>
+        <div class="formats reveal">
+          <span>STEP</span><span>STL</span><span>3MF</span><span>OBJ</span><span>PLY</span><span>GLB</span><span>glTF</span><span>OFF</span><span>SVG</span><span>PDF</span><span>PNG</span>
+        </div>
+      </section>
+
+      <section>
+        <div class="head reveal">
+          <div class="eyebrow">Make it yours</div>
+          <h2>Seven themes. Two ways to work.</h2>
+          <p>Dark like your code editor or bright like paper, and switch between Tinkercad-style handles and Pro-style arrows whenever you like.</p>
+        </div>
+        <div class="duo">
+          <figure class="reveal">
+            <img src="assets/app-sketch.png" alt="OnlineCAD in the Carbon theme with the Sketch tools open" loading="lazy" width="1584" height="935" />
+            <figcaption>Carbon theme · Sketch tools</figcaption>
+          </figure>
+          <figure class="reveal">
+            <img src="assets/app-light.png" alt="OnlineCAD in the Light theme with the View tools open" loading="lazy" width="1584" height="935" />
+            <figcaption>Light theme · View tools</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="download">
+        <div class="download reveal">
+          <h2>Get OnlineCAD</h2>
+          <p class="muted">Free. Use it in the browser right now, or install the desktop app.</p>
+          <div class="platforms">
+            <a class="platform" data-os="win" data-file="OnlineCAD-Setup.exe" href="#">
+              <strong>Windows</strong><span>Windows 10 or newer · x64</span><em>Download .exe →</em>
+            </a>
+            <a class="platform" data-os="mac" data-file="OnlineCAD.dmg" href="#">
+              <strong>macOS</strong><span>Apple silicon and Intel</span><em>Download .dmg →</em>
+            </a>
+            <a class="platform" data-os="linux" data-file="OnlineCAD.AppImage" href="#">
+              <strong>Linux</strong><span>AppImage · x64</span><em>Download →</em>
+            </a>
+            <a class="platform" data-app href="#">
+              <strong>Browser</strong><span>Chrome, Edge, Firefox, Safari</span><em>Open the app →</em>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap foot">
+        <span>© <span id="year"></span> OnlineCAD · Made by Leon Sieber</span>
+        <nav>
+          <a data-app href="#">Open app</a>
+          <a data-repo href="#">GitHub</a>
+          <a data-releases href="#">Releases</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script>
+      // ---- Where things live. Change these two if your addresses differ (see HOSTING.md).
+      const APP_URL = 'https://onlinecad.pages.dev';
+      const REPO = 'https://github.com/Leonsieber/OnlineCAD';
+
+      const download = (file) => `${REPO}/releases/latest/download/${file}`;
+      document.querySelectorAll('[data-app]').forEach((a) => (a.href = APP_URL));
+      document.querySelectorAll('[data-repo]').forEach((a) => (a.href = REPO));
+      document.querySelectorAll('[data-releases]').forEach((a) => (a.href = `${REPO}/releases`));
+      document.querySelectorAll('[data-file]').forEach((a) => (a.href = download(a.dataset.file)));
+      document.getElementById('year').textContent = new Date().getFullYear();
+
+      // The big button offers the right installer for this computer.
+      const ua = navigator.userAgent;
+      const os = /Mac/.test(ua) ? 'mac' : /Linux|X11/.test(ua) && !/Android/.test(ua) ? 'linux' : /Win/.test(ua) ? 'win' : 'web';
+      const primary = document.querySelector('[data-primary]');
+      const fine = document.querySelector('[data-fine]');
+      const OS = {
+        win: ['Download for Windows', 'OnlineCAD-Setup.exe', 'Windows 10+ · x64 · Free · No account needed'],
+        mac: ['Download for macOS', 'OnlineCAD.dmg', 'macOS · Apple silicon and Intel · Free'],
+        linux: ['Download for Linux', 'OnlineCAD.AppImage', 'Linux · AppImage · x64 · Free'],
+      };
+      if (OS[os]) {
+        primary.querySelector('span').textContent = OS[os][0];
+        primary.href = download(OS[os][1]);
+        fine.textContent = OS[os][2];
+        document.querySelector(`[data-os="${os}"]`)?.classList.add('mine');
+      } else {
+        primary.querySelector('svg').remove();
+        primary.querySelector('span').textContent = 'Open in browser';
+        primary.href = APP_URL;
+        fine.textContent = 'Free · No account needed';
+        // On phones and tablets the main button already opens the app; offer downloads instead.
+        const second = document.querySelector('.hero-cta [data-app]');
+        second.textContent = 'Desktop downloads →';
+        second.href = '#download';
+        second.removeAttribute('data-app');
+      }
+
+      // ---- Reveal on scroll
+      const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && (e.target.classList.add('in'), io.unobserve(e.target))), { threshold: 0.12 });
+      document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      // ---- Hero: a mounting bracket drawn in dots, slowly turning (follows the pointer a little).
+      (function hero() {
+        const canvas = document.getElementById('dots');
+        const ctx = canvas.getContext('2d');
+        const pts = [];
+        const add = (x, y, z, nx, ny, nz) => pts.push([x, y, z, nx, ny, nz]);
+        // Base plate 120 × 80 × 12 with rounded corners
+        const W = 60, D = 40, H = 12, R = 14, step = 4;
+        const inPlate = (x, y) => {
+          const cx = Math.max(Math.abs(x) - (W - R), 0), cy = Math.max(Math.abs(y) - (D - R), 0);
+          return cx * cx + cy * cy <= R * R;
+        };
+        const holes = [[38, -20, 7], [38, 20, 7], [-14, 0, 15]];
+        const inHole = (x, y) => holes.some(([hx, hy, hr]) => (x - hx) ** 2 + (y - hy) ** 2 < hr * hr);
+        for (let x = -W; x <= W; x += step) for (let y = -D; y <= D; y += step) if (inPlate(x, y) && !inHole(x, y)) add(x, y, H, 0, 0, 1);
+        // Plate sides
+        for (let t = 0; t < Math.PI * 2; t += 0.035) {
+          const c = Math.cos(t), s = Math.sin(t);
+          // trace the rounded rectangle outline by projecting a ray onto it
+          let r = 1;
+          while (inPlate(c * r, s * r)) r += 0.5;
+          for (let z = 0; z <= H; z += step) add(c * r, s * r, z, c, s, 0);
+        }
+        // Boss: tube on the plate around the big hole
+        const [bx, by] = [-14, 0];
+        for (let t = 0; t < Math.PI * 2; t += 0.1) {
+          const c = Math.cos(t), s = Math.sin(t);
+          for (let z = H; z <= 46; z += step) add(bx + c * 26, by + s * 26, z, c, s, 0);
+          for (let rr = 15; rr <= 26; rr += step) add(bx + c * rr, by + s * rr, 46, 0, 0, 1);
+          for (let z = H; z <= 46; z += step * 1.5) add(bx + c * 15, by + s * 15, z, -c, -s, 0);
+        }
+        for (const [hx, hy, hr] of holes.slice(0, 2)) for (let t = 0; t < Math.PI * 2; t += 0.3) for (let z = 0; z <= H; z += step) add(hx + Math.cos(t) * hr, hy + Math.sin(t) * hr, z, -Math.cos(t), -Math.sin(t), 0);
+
+        let w = 0, h = 0, dpr = 1, mx = 0, my = 0, tx = 0, ty = 0;
+        const resize = () => {
+          dpr = Math.min(devicePixelRatio || 1, 2);
+          w = canvas.clientWidth;
+          h = canvas.clientHeight;
+          canvas.width = w * dpr;
+          canvas.height = h * dpr;
+        };
+        addEventListener('resize', resize);
+        resize();
+        canvas.parentElement.addEventListener('pointermove', (e) => {
+          const r = canvas.getBoundingClientRect();
+          tx = ((e.clientX - r.left) / r.width - 0.5) * 0.6;
+          ty = ((e.clientY - r.top) / r.height - 0.5) * 0.3;
+        });
+        const light = [0.4, -0.5, 0.75];
+        const ll = Math.hypot(...light);
+        const draw = (time) => {
+          mx += (tx - mx) * 0.04;
+          my += (ty - my) * 0.04;
+          const a = (reduced ? 0.6 : time / 9000) + mx;
+          const tilt = 1.0 + my;
+          const ca = Math.cos(a), sa = Math.sin(a), ct = Math.cos(tilt), st = Math.sin(tilt);
+          const scale = Math.min(w, h) / 118;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+          // Background halftone field
+          ctx.fillStyle = 'rgba(255,255,255,0.05)';
+          for (let x = 8; x < w; x += 16) for (let y = 8; y < h; y += 16) ctx.fillRect(x, y, 1.2, 1.2);
+          const proj = [];
+          for (const [x, y, z, nx, ny, nz] of pts) {
+            const X = x * ca - y * sa, Y = x * sa + y * ca;
+            const Zc = z - 20;
+            const sy = Y * ct - Zc * st, sz = Y * st + Zc * ct;
+            const NX = nx * ca - ny * sa, NY = nx * sa + ny * ca;
+            const nsy = NY * ct - nz * st, nsz = NY * st + nz * ct;
+            // The viewer looks along -sz, so normals with a positive sz face us.
+            if (nsz < -0.15) continue;
+            const lit = Math.max(0.12, (NX * light[0] + NY * light[1] + nz * light[2]) / ll);
+            proj.push([w / 2 + X * scale, h * 0.58 + sy * scale, sz, lit]);
+          }
+          // Far points first, near points last.
+          proj.sort((p, q) => p[2] - q[2]);
+          for (const [px, py, , lit] of proj) {
+            const r = (0.6 + lit * 1.5) * Math.max(scale / 4, 0.8);
+            ctx.fillStyle = `rgba(${Math.round(150 + 105 * lit)},${Math.round(170 + 85 * lit)},255,${0.12 + lit * 0.5})`;
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          if (!reduced) requestAnimationFrame(draw);
+        };
+        requestAnimationFrame(draw);
+      })();
+
+      // ---- Small dot drawings on the three cards
+      document.querySelectorAll('[data-glyph]').forEach((c) => {
+        const kind = c.dataset.glyph;
+        const ctx = c.getContext('2d');
+        const dpr = Math.min(devicePixelRatio || 1, 2);
+        const draw = (t) => {
+          const w = c.clientWidth, h = c.clientHeight;
+          if (c.width !== w * dpr) (c.width = w * dpr), (c.height = h * dpr);
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+          const dot = (x, y, r, a) => {
+            ctx.fillStyle = `rgba(160,185,255,${a})`;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, 7);
+            ctx.fill();
+          };
+          const s = reduced ? 0 : t / 1000;
+          if (kind === 'shapes') {
+            // A box being resized and a cylinder dropping onto the plate
+            const k = 1 + 0.25 * Math.sin(s);
+            for (let x = 0; x < 6; x++) for (let y = 0; y < 5; y++) dot(w * 0.22 + x * 9 * k, h * 0.3 + y * 9, 2, 0.8);
+            const drop = Math.max(0, Math.sin(s * 0.8)) * 22;
+            for (let i = 0; i < 24; i++) for (let z = 0; z < 5; z++) dot(w * 0.68 + Math.cos((i / 24) * 6.28) * 20, h * 0.66 - z * 8 - drop + Math.sin((i / 24) * 6.28) * 6, 1.6, 0.35 + 0.5 * (Math.sin((i / 24) * 6.28) > 0));
+          } else if (kind === 'sketch') {
+            // A constrained profile being drawn
+            const n = Math.floor((s * 30) % 140);
+            const path = [];
+            for (let i = 0; i <= 40; i++) path.push([w * 0.2 + i * (w * 0.6 / 40), h * 0.75]);
+            for (let i = 0; i <= 20; i++) path.push([w * 0.8, h * 0.75 - i * (h * 0.45 / 20)]);
+            for (let i = 0; i <= 40; i++) path.push([w * 0.8 - i * (w * 0.6 / 40), h * 0.3]);
+            for (let i = 0; i <= 20; i++) path.push([w * 0.2, h * 0.3 + i * (h * 0.45 / 20)]);
+            path.forEach(([x, y], i) => dot(x, y, 1.7, i < n ? 0.95 : 0.15));
+            for (let i = 0; i < 36; i++) dot(w * 0.5 + Math.cos((i / 36) * 6.28) * 18, h * 0.525 + Math.sin((i / 36) * 6.28) * 18, 1.5, n > 120 ? 0.9 : 0.15);
+            ctx.fillStyle = 'rgba(160,185,255,.8)';
+            ctx.font = '600 11px Inter, sans-serif';
+            ctx.fillText('120', w * 0.47, h * 0.87);
+          } else {
+            // A blob being inflated
+            for (let i = 0; i < 70; i++) {
+              const a = (i / 70) * 6.28;
+              const bump = 1 + 0.28 * Math.exp(-(((a - 1.2 - Math.sin(s) * 0.6) % 6.28) ** 2) * 3) * (0.6 + 0.4 * Math.sin(s * 2));
+              for (let r = 6; r <= 46; r += 8) dot(w / 2 + Math.cos(a) * r * bump * (r / 46) * 1.4, h / 2 + Math.sin(a) * r * bump * (r / 46), 1.4, 0.15 + (r / 46) * 0.75);
+            }
+          }
+          if (!reduced) requestAnimationFrame(draw);
+        };
+        requestAnimationFrame(draw);
+      });
+
+      // ---- AI console: type the prompt, then show the parameters
+      (function typePrompt() {
+        const el = document.getElementById('typed');
+        const params = document.getElementById('params');
+        const text = 'A phone stand with a 65° back and a slot for the charging cable';
+        let i = 0;
+        const start = () => {
+          i = 0;
+          params.classList.remove('on');
+          tick();
+        };
+        const tick = () => {
+          el.textContent = text.slice(0, i);
+          if (i++ < text.length) setTimeout(tick, 38);
+          else {
+            setTimeout(() => params.classList.add('on'), 500);
+            setTimeout(start, 6500);
+          }
+        };
+        new IntersectionObserver((es, o) => es[0].isIntersecting && (start(), o.disconnect())).observe(el);
+        if (reduced) el.textContent = text;
+      })();
+    </script>
+  </body>
+</html>
