@@ -1,4 +1,12 @@
 import {
+  IconPencil,
+  IconCode,
+  IconGrain,
+  IconBrush,
+  IconArrowBarUp,
+  IconRotateClockwise2,
+  IconRoute,
+  IconStack3,
   IconAngle,
   IconArrowsMove,
   IconBorderRadius,
@@ -70,6 +78,22 @@ export function featureIcon(f: Feature): Icon {
       return IconFileImport;
     case 'deleteParts':
       return IconTrash;
+    case 'sketch':
+      return IconPencil;
+    case 'extrude':
+      return IconArrowBarUp;
+    case 'revolve':
+      return IconRotateClockwise2;
+    case 'sweep':
+      return IconRoute;
+    case 'loft':
+      return IconStack3;
+    case 'meshEdit':
+      return IconGrain;
+    case 'sculpt':
+      return IconBrush;
+    case 'script':
+      return IconCode;
     default:
       return IconBox;
   }

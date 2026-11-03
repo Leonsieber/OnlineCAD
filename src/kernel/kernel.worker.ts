@@ -43,6 +43,9 @@ const api = {
   measure(id: string) {
     return serial(() => K.measure(id));
   },
+  drawingViews(ids: string[]) {
+    return serial(() => K.drawingViews(ids));
+  },
   exportMeshes(ids: string[]) {
     return serial(() => {
       const meshes = K.exportMeshes(ids);

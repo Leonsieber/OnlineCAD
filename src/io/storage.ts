@@ -46,3 +46,25 @@ export function isCadDocument(x: unknown): x is CadDocument {
   const d = x as CadDocument;
   return !!d && d.format === 'onlinecad' && Array.isArray(d.features) && typeof d.id === 'string';
 }
+
+/** Renames a saved document without opening it. */
+export async function renameStoredDoc(id: string, name: string) {
+  const doc = await loadDoc(id);
+  const meta = await get<DocMeta>(`meta:${id}`);
+  if (!doc || !meta) return;
+  await set(`doc:${id}`, { ...doc, name });
+  await set(`meta:${id}`, { ...meta, name });
+}
+
+/** Saves a copy of a document under a new id and returns the copy's metadata. */
+export async function duplicateStoredDoc(id: string, newId: string): Promise<DocMeta | undefined> {
+  const doc = await loadDoc(id);
+  const meta = await get<DocMeta>(`meta:${id}`);
+  if (!doc || !meta) return;
+  const now = Date.now();
+  const copy: CadDocument = { ...doc, id: newId, name: `${doc.name} copy`, created: now, modified: now };
+  const copyMeta: DocMeta = { ...meta, id: newId, name: copy.name, created: now, modified: now };
+  await set(`doc:${newId}`, copy);
+  await set(`meta:${newId}`, copyMeta);
+  return copyMeta;
+}

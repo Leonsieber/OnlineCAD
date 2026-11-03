@@ -65,6 +65,18 @@ export const viewApi = {
     void c.setLookAt(s.center.x + d.x, s.center.y + d.y, s.center.z + d.z, s.center.x, s.center.y, s.center.z, animate);
     if ('isOrthographicCamera' in cam) void c.fitToSphere(s, animate);
   },
+  /** Looks straight at a plane (for sketching), with `up` pointing up on screen. */
+  lookAlong(normal: Vec3, up: Vec3, center: Vec3, radius: number, animate = true) {
+    const c = viewRefs.controls;
+    const cam = getCamera();
+    if (!c || !cam) return;
+    const fov = 'fov' in cam ? ((cam as { fov: number }).fov * Math.PI) / 180 : 0.6;
+    const dist = (radius / Math.sin(fov / 2)) * 1.1;
+    // A hair of tilt toward -up keeps "up" well defined when the normal is vertical.
+    const d = new Vector3(...normal).normalize().addScaledVector(new Vector3(...up).normalize(), -1e-4).normalize().multiplyScalar(dist);
+    void c.setLookAt(center[0] + d.x, center[1] + d.y, center[2] + d.z, center[0], center[1], center[2], animate);
+    if ('isOrthographicCamera' in cam) void c.fitToSphere(new Sphere(new Vector3(...center), radius), animate);
+  },
   /** Point on the ground plane under the middle of the view, snapped to a 5 mm grid. */
   groundPointAtCenter(): Vec3 {
     const cam = getCamera();
@@ -101,6 +113,26 @@ export const viewApi = {
     return { point: p.toArray() as Vec3, normal: [0, 0, 1] };
   },
 
+  /** Saves the view as a PNG at twice the screen resolution. */
+  saveImage() {
+    const canvas = viewRefs.canvas;
+    const gl = viewRefs.renderer;
+    if (!canvas || !gl) return;
+    const { doc } = useStore.getState();
+    const prev = gl.getPixelRatio();
+    gl.setPixelRatio(Math.min(prev * 2, 4));
+    viewRefs.renderNow?.();
+    canvas.toBlob((blob) => {
+      gl.setPixelRatio(prev);
+      invalidateFn();
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${doc.name.replace(/[^\w\- ]+/g, '').trim() || 'model'}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }, 'image/png');
+  },
   /** Small thumbnail of the current view for the documents list. */
   capture(): string | null {
     const src = viewRefs.canvas;

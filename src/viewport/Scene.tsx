@@ -29,6 +29,14 @@ import { liveMove } from './liveMove';
 import { PartView, type PartLook } from './PartView';
 import { ResizeHandles } from './ResizeHandles';
 import { DraftArrows } from './ValueArrows';
+import { SketchEditor, SketchOverlays } from './SketchEditor';
+import { MeasureLayer, isMeasuring } from './Measure';
+import { SculptLayer, isSculpting, useSculpt } from './Sculpt';
+import { RealisticStage } from './RealisticStage';
+import { PrintCheckLayer } from './PrintCheck';
+import { materialDef } from '../model/materials';
+import { isPlaced } from '../model/defaults';
+import { isSketching } from '../sketch/sketchUi';
 import { cameraEvents, cameraPose, pickables, viewRefs } from './registry';
 import { useSceneColors } from './sceneColors';
 import { bindView, partsBox } from './viewApi';
@@ -53,6 +61,12 @@ export function Scene() {
       <ResizeHandles />
       <DraftArrows />
       <Gizmo />
+      <SketchOverlays />
+      <SketchEditor />
+      <MeasureLayer />
+      <SculptLayer />
+      <RealisticStage />
+      <PrintCheckLayer />
     </>
   );
 }
@@ -114,13 +128,29 @@ function Controls() {
     };
     c.addEventListener('update', onUpdate);
     onUpdate();
-    // Shift + left drag pans, like most CAD tools.
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Shift') c.mouseButtons.left = e.type === 'keydown' ? A.TRUCK : A.ROTATE;
+    // Shift + left drag pans, like most CAD tools. While sketching, the left button draws, so the
+    // right button orbits and the middle button pans.
+    let shift = false;
+    const nav = () => {
+      const sketching = isSketching() || isSculpting();
+      c.mouseButtons.left = sketching ? A.NONE : shift ? A.TRUCK : A.ROTATE;
+      c.mouseButtons.right = sketching ? A.ROTATE : A.TRUCK;
     };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Shift') return;
+      shift = e.type === 'keydown';
+      nav();
+    };
+    nav();
+    const unsubNav = useStore.subscribe((s, prev) => {
+      if (s.draft !== prev.draft) nav();
+    });
+    const unsubSculpt = useSculpt.subscribe(nav);
     window.addEventListener('keydown', key);
     window.addEventListener('keyup', key);
     return () => {
+      unsubNav();
+      unsubSculpt();
       c.removeEventListener('update', onUpdate);
       window.removeEventListener('keydown', key);
       window.removeEventListener('keyup', key);
@@ -260,6 +290,7 @@ function Parts() {
             id={p.id}
             data={data}
             color={partColor(p.id, { doc, parts })}
+            surface={materialDef(doc.parts[p.id]?.material)}
             display={display}
             look={look}
             edgeColor={colors.edge}
@@ -518,6 +549,10 @@ function Picker() {
     const hoverNow = () => {
       raf = 0;
       if (!last) return;
+      if (isSketching() || isMeasuring() || isSculpting()) {
+        if (useStore.getState().hover) useStore.getState().setHover(null);
+        return;
+      }
       const filter = activeFilter();
       const s = useStore.getState();
       const blocked = !filter || viewRefs.gizmoAxis() || viewRefs.handleHovered || viewRefs.handleDragging;
@@ -536,6 +571,10 @@ function Picker() {
     };
     const onUp = (e: PointerEvent) => {
       if (!down) return;
+      if (isSketching() || isMeasuring() || isSculpting()) {
+        down = null;
+        return;
+      }
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
       const button = down.button;
       down = null;
@@ -570,7 +609,7 @@ function Picker() {
       const item = pickAt(el, camRef.current, e.clientX, e.clientY, 'part');
       const p = item && s.parts.find((x) => x.id === item.part);
       if (!p) return;
-      const own = s.doc.features.find((f) => f.id === p.id && f.type === 'primitive');
+      const own = s.doc.features.find((f) => f.id === p.id && isPlaced(f));
       s.editFeature(own ? own.id : p.last);
     };
     el.addEventListener('dblclick', onDbl);
@@ -604,7 +643,7 @@ function Gizmo() {
   const tcRef = useRef<{ axis: string | null } | null>(null);
 
   const ids = useMemo(() => {
-    const raw = draft ? (draft.feature.type === 'primitive' ? [draft.feature.id] : []) : sel.filter((x) => x.kind === 'part').map((x) => x.part);
+    const raw = draft ? (isPlaced(draft.feature) ? [draft.feature.id] : []) : sel.filter((x) => x.kind === 'part').map((x) => x.part);
     return raw.filter((id) => parts.some((p) => p.id === id));
   }, [draft, sel, parts]);
   const idKey = ids.join('|');

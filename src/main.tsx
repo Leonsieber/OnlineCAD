@@ -5,6 +5,7 @@ import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-
 import '@fontsource-variable/inter';
 import './styles/app.css';
 import { App } from './App';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 
 // CAD convention: Z points up. Set before any camera or object is created.
 Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -42,6 +43,8 @@ if (import.meta.env.DEV) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

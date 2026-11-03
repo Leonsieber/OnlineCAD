@@ -1,6 +1,9 @@
 # OnlineCAD
 
-Parametric 3D modelling in the browser, with a pro ribbon layout. Solids are built by OpenCascade (FreeCAD's geometry kernel), compiled to WebAssembly and running in a web worker on your computer.
+Free parametric 3D CAD in the browser and on the desktop. Drag in shapes like Tinkercad, sketch and
+extrude like Onshape, sculpt meshes, generate parts with AI, and export for 3D printing. Solids are
+built by OpenCascade (FreeCAD's geometry kernel), compiled to WebAssembly and running on your own
+computer.
 
 ## Run it
 
@@ -9,41 +12,63 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173. `npm run build` makes a static site in `dist/` that any static host can serve.
+Then open http://localhost:5173.
 
-## What works (milestone 1)
+| Command | What it does |
+| --- | --- |
+| `npm run build` | Typecheck and build the web app into `dist/` (installable, works offline) |
+| `npm test` | Unit tests (solver, profiles, formulas, mesh tools) |
+| `npm run desktop` | Build and open the desktop app (Electron) |
+| `npm run dist:desktop` | Build the Windows installer into `release/` |
 
-- 10 shapes: box, cylinder, sphere, cone, torus, tube, wedge, pyramid, prism, ellipsoid
-- Union, subtract, intersect; fillet and chamfer on picked edges; shell (hollow) from picked faces
-- Move and rotate with a gizmo (snapping), precise transform, mirror, linear and circular patterns, duplicate
-- Feature history with edit, rename, suppress, delete, and a draggable rollback bar; timeline replay
-- Variables and formulas in every number field (`width / 2`, `1 in`, `sin(30)`)
-- Picking parts, faces, or edges with hover highlights; size, volume, area, and weight readouts
-- Tinkercad-style editing: drag shapes from the ribbon onto the plate (or onto a face), resize handles
-  with editable sizes, a lift cone, a rotate dot, drag a selected part to move it, Hole/Solid and Group (Ctrl+G)
-- Drag arrows on fillets, chamfers, and shells (Onshape/Shapr3D style)
-- Resizing stretches shapes exactly (cylinders become elliptical, spheres become ellipsoids); groups made from
-  shapes stretch by resizing the shapes inside them; imported STEP solids scale evenly
-- Dark, light, and system themes; perspective and orthographic views; four display modes; view cube
-- Import: STEP (as solids), STL, OBJ, PLY, GLB/glTF, 3MF, OFF (as meshes)
-- Export: STEP, STL, 3MF, OBJ, PLY, GLB
-- Undo/redo, autosave to the browser (IndexedDB), documents list, `.ocad` file download and open
+To host it for free (Cloudflare Pages + Supabase) and publish desktop installers, see
+[HOSTING.md](HOSTING.md).
+
+## Features
+
+**Start and organise**
+- Projects dashboard with thumbnails, search, sort, rename, duplicate, templates, and drag-and-drop import
+- Sign in with Google, GitHub, or an email link to sync projects to the cloud and share read-only links
+  (when the host has connected Supabase); everything also works offline in the browser
+
+**Model**
+- Two interaction styles: **Tinkercad** (drag parts, resize handles, three rotate arcs with a
+  protractor, arrow-key nudging, D to drop) and **Pro** (move arrows and rotate rings, like Onshape)
+- 10 shapes, union / subtract / intersect, Hole and Group, fillet, chamfer, shell, mirror, patterns
+- **Sketches** on planes or faces: lines, rectangles, circles, arcs, construction geometry,
+  15 constraints, dimensions that take formulas, and a "fully defined" indicator
+- **Extrude** (new, add, cut, intersect; one way, symmetric, or two ways), **revolve**, **sweep**, **loft**
+- Feature history with edit, suppress, rollback, and timeline; variables and formulas in every field
+- **Parts library**: bolts, nuts, washers, standoffs, gears, springs, bearings, project boxes, lids
+- **Scripting**: build parts in JavaScript with the replicad API and named parameters
+- **AI**: describe a part and Claude (or OpenAI, Gemini through OpenRouter, or a local Ollama model)
+  writes a parametric script; failed scripts are sent back to the model to fix
+
+**Mesh and look**
+- Convert to mesh, Loop subdivision, smoothing, and sculpt brushes (inflate, deflate, smooth,
+  flatten, grab), all recorded in the history
+- 18 materials (plastics, metals, wood, glass…) with realistic shading and mass by density
+- Realistic view with filmic lighting and contact shadows; save the view as a PNG
+- Seven themes (Midnight, Carbon, Graphite, Ocean, Light, Paper, High contrast) or follow the system
+
+**Check and share**
+- Measure tool with snapping to corners, edge midpoints, and face centers
+- 3D-print check: overhangs, build volume, plate contact, and a filament estimate
+- 2D technical drawings (front, top, right, iso, hidden lines, dimensions) as SVG or PDF
+- Import STEP, STL, OBJ, PLY, GLB/glTF, 3MF, OFF; export STEP, STL, 3MF, OBJ, PLY, GLB, and `.ocad`
 
 ## Layout
 
 | Folder | Contents |
 | --- | --- |
-| `src/model` | Document types, expressions, feature defaults, example |
-| `src/kernel` | Geometry worker (OpenCascade), rebuild cache, protocol |
-| `src/store` | App state, undo, selection, drag-to-move logic |
-| `src/viewport` | three.js scene, picking, gizmo, view cube |
-| `src/ui` | Menu bar, ribbon, history tree, properties, timeline |
-| `src/io` | Import, export, local storage |
-
-## Roadmap
-
-1. Core modelling (done)
-2. Sketches with constraints; extrude, revolve, sweep, loft; measure tool
-3. Mesh editing, subdivision, sculpting, materials, rendering
-4. Sign-in (Google, GitHub, email), cloud saves, sharing, hosting on Cloudflare Pages + Supabase, desktop app
-5. 2D drawings, 3D-print checks, assemblies, parts library, scripting, live collaboration
+| `src/model` | Document types, formulas, defaults, materials, parts library |
+| `src/kernel` | Geometry worker (OpenCascade): features, sketches to solids, mesh tools, scripts |
+| `src/sketch` | Constraint solver, profile detection, sketch editing state |
+| `src/store` | App state, undo, selection, moves and resizes |
+| `src/viewport` | three.js scene, handles, sketch editor, measure, sculpt, print check |
+| `src/ui` | Dashboard, ribbon, panels, dialogs, AI panel, drawings |
+| `src/ai` | Text-to-CAD for Claude and OpenAI-compatible providers |
+| `src/cloud` | Supabase sign-in and cloud projects |
+| `electron` | Desktop app |
+| `website` | The landing page |
+| `supabase` | Database schema with row-level security |

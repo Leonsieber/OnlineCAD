@@ -52,6 +52,17 @@ export interface FeatureStatus {
   ms?: number;
 }
 
+/**
+ * Marks a part inside a status message. The UI swaps in the part's current name from the Parts list,
+ * so renaming a part doesn't need a rebuild. `label` is the fallback for parts that no longer exist.
+ */
+export const partRef = (id: string, label: string) => `{{part:${id}|${label}}}`;
+const PART_REF = /\{\{part:([^|}]*)\|(.*?)\}\}/g;
+
+export function resolvePartRefs(message: string, name: (id: string) => string | undefined): string {
+  return message.replace(PART_REF, (_m, id: string, label: string) => name(id) ?? label);
+}
+
 export interface EvalResult {
   seq: number;
   parts: PartResult[];
@@ -74,4 +85,11 @@ export interface MeasureResult {
   centerOfMass: Vec3;
   bbox: [Vec3, Vec3];
   solid: boolean;
+}
+
+export interface DrawingView {
+  name: 'front' | 'top' | 'right' | 'iso';
+  visible: string[];
+  hidden: string[];
+  box: [number, number, number, number];
 }

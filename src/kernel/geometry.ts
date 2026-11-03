@@ -321,9 +321,12 @@ function faceScore(fp: Float64Array, o: number, r: number[], scale: number) {
   return d3(fp, o, r, 0) + scale * 0.2 * (1 - dot) + 0.2 * Math.abs(Math.sqrt(fp[o + 6]) - Math.sqrt(Math.max(r[6], 0))) + typeCost;
 }
 
-function bestMatch(count: number, preferred: number, score: (i: number) => number): number {
-  if (count === 0) return -1;
-  if (preferred >= 0 && preferred < count && score(preferred) < 1e-5) return preferred;
+function bestMatch(count: number, preferred: number, score: (i: number) => number): { index: number; score: number } {
+  if (count === 0) return { index: -1, score: Infinity };
+  if (preferred >= 0 && preferred < count) {
+    const s = score(preferred);
+    if (s < 1e-5) return { index: preferred, score: s };
+  }
   let best = 0;
   let bestScore = Infinity;
   for (let i = 0; i < count; i++) {
@@ -333,35 +336,98 @@ function bestMatch(count: number, preferred: number, score: (i: number) => numbe
       best = i;
     }
   }
-  return best;
+  return { index: best, score: bestScore };
 }
 
-export function resolveEdges(shape: AnyShape, refs: EdgeRef[]): Set<number> {
+type Box = [Vec3, Vec3];
+
+/**
+ * Carries points picked on a part with bounds `from` to the same spots on the part now bounded by `to`,
+ * which is where they are after the part was moved or resized.
+ */
+function boxMap(from: Box, to: Box) {
+  const s = [0, 1, 2].map((k) => {
+    const a = from[1][k] - from[0][k];
+    const b = to[1][k] - to[0][k];
+    return a > 1e-9 && b > 1e-9 ? b / a : 1;
+  }) as Vec3;
+  const point = (v: ArrayLike<number>, o: number): Vec3 => [0, 1, 2].map((k) => to[0][k] + (v[o + k] - from[0][k]) * s[k]) as Vec3;
+  return { s, point };
+}
+
+function mapEdgeFp(r: number[], m: ReturnType<typeof boxMap>): number[] {
+  const out = r.slice();
+  out.splice(0, 9, ...m.point(r, 0), ...m.point(r, 3), ...m.point(r, 6));
+  // Open edges stretch like their chord; closed ones (full circles) by the average stretch.
+  const chord = d3(r, 3, r, 6);
+  out[9] = chord > 1e-6 ? (r[9] * d3(out, 3, out, 6)) / chord : r[9] * Math.cbrt(m.s[0] * m.s[1] * m.s[2]);
+  return out;
+}
+
+function mapFaceFp(r: number[], m: ReturnType<typeof boxMap>): number[] {
+  const out = r.slice();
+  out.splice(0, 3, ...m.point(r, 0));
+  // A plane's normal maps by the inverse stretch, and its area by det(S)·|S⁻¹n|.
+  const n: Vec3 = [r[3] / m.s[0], r[4] / m.s[1], r[5] / m.s[2]];
+  const len = Math.hypot(...n) || 1;
+  out.splice(3, 3, n[0] / len, n[1] / len, n[2] / len);
+  out[6] = r[6] * m.s[0] * m.s[1] * m.s[2] * len;
+  return out;
+}
+
+/**
+ * Matches each reference to an entity, trying two guesses: the entity is where it was picked, or it
+ * moved and stretched along with the part's bounding box. The guess that fits all references best wins.
+ * A reference counts as loose when its best score is far off for a part of this size.
+ */
+function matchRefs<R extends { index: number; fp: number[]; box?: Box }>(
+  refs: R[],
+  count: number,
+  bounds: Box,
+  map: (fp: number[], m: ReturnType<typeof boxMap>) => number[],
+  score: (i: number, fp: number[]) => number,
+): { indices: number[]; loose: number } {
+  const size = Math.max(...[0, 1, 2].map((k) => bounds[1][k] - bounds[0][k]), 1);
+  const run = (fps: number[][]) => {
+    const hits = refs.map((r, j) => bestMatch(count, r.index, (k) => score(k, fps[j])));
+    return { hits, total: hits.reduce((t, h) => t + Math.min(h.score, TYPE_MISMATCH), 0) };
+  };
+  let best = run(refs.map((r) => r.fp));
+  if (best.total > 1e-5 && refs.some((r) => r.box)) {
+    const followed = run(refs.map((r) => (r.box ? map(r.fp, boxMap(r.box, bounds)) : r.fp)));
+    if (followed.total < best.total) best = followed;
+  }
+  return {
+    indices: best.hits.map((h) => h.index),
+    loose: best.hits.filter((h) => h.index >= 0 && h.score > 0.2 * size).length,
+  };
+}
+
+export interface Resolved {
+  hashes: Set<number>;
+  /** References that only matched loosely, so they may have landed on the wrong entity. */
+  loose: number;
+}
+
+export function resolveEdges(shape: AnyShape, refs: EdgeRef[]): Resolved {
   const { edges, fp } = edgeFingerprints(shape);
   // Seams are never shown or picked, so they must never be matched either.
   const seams = seamEdgeHashes(shape);
   const isSeam = edges.map((e) => seams.has(e.hashCode));
-  const hashes = new Set<number>();
-  for (const ref of refs) {
-    const i = bestMatch(edges.length, ref.index, (k) => (isSeam[k] ? Infinity : edgeScore(fp, k * EDGE_INFO_STRIDE, ref.fp)));
-    if (i >= 0) hashes.add(edges[i].hashCode);
-  }
+  const { indices, loose } = matchRefs(refs, edges.length, boundsOf(shape), mapEdgeFp, (k, r) => (isSeam[k] ? Infinity : edgeScore(fp, k * EDGE_INFO_STRIDE, r)));
+  const hashes = new Set(indices.filter((i) => i >= 0).map((i) => edges[i].hashCode));
   edges.forEach((e) => e.delete());
-  return hashes;
+  return { hashes, loose };
 }
 
-export function resolveFaces(shape: AnyShape, refs: FaceRef[]): Set<number> {
+export function resolveFaces(shape: AnyShape, refs: FaceRef[]): Resolved {
   const { faces, fp } = faceFingerprints(shape);
-  const bb = shape.boundingBox;
-  const scale = Math.max(bb.width, bb.height, bb.depth, 1);
-  bb.delete();
-  const hashes = new Set<number>();
-  for (const ref of refs) {
-    const i = bestMatch(faces.length, ref.index, (k) => faceScore(fp, k * FACE_INFO_STRIDE, ref.fp, scale));
-    if (i >= 0) hashes.add(faces[i].hashCode);
-  }
+  const bounds = boundsOf(shape);
+  const scale = Math.max(...[0, 1, 2].map((k) => bounds[1][k] - bounds[0][k]), 1);
+  const { indices, loose } = matchRefs(refs, faces.length, bounds, mapFaceFp, (k, r) => faceScore(fp, k * FACE_INFO_STRIDE, r, scale));
+  const hashes = new Set(indices.filter((i) => i >= 0).map((i) => faces[i].hashCode));
   faces.forEach((f) => f.delete());
-  return hashes;
+  return { hashes, loose };
 }
 
 /**

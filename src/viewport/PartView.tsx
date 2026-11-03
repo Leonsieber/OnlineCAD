@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
-import { BufferAttribute, BufferGeometry, DoubleSide, EdgesGeometry, Group, Mesh, MeshStandardMaterial } from 'three';
+import { BufferAttribute, BufferGeometry, DoubleSide, EdgesGeometry, Group, Mesh, MeshPhysicalMaterial } from 'three';
+import type { MaterialDef } from '../model/materials';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
@@ -15,6 +16,7 @@ interface Props {
   id: string;
   data: MeshData;
   color: string;
+  surface: MaterialDef;
   display: DisplayMode;
   look: PartLook;
   edgeColor: string;
@@ -39,7 +41,7 @@ export function buildGeometry(data: MeshData): BufferGeometry {
   return g;
 }
 
-export function PartView({ id, data, color, display, look, edgeColor, accent, hover, hole = false }: Props) {
+export function PartView({ id, data, color, surface, display, look, edgeColor, accent, hover, hole = false }: Props) {
   const invalidate = useThree((s) => s.invalidate);
   const group = useRef<Group>(null!);
   const meshRef = useRef<Mesh>(null!);
@@ -78,7 +80,7 @@ export function PartView({ id, data, color, display, look, edgeColor, accent, ho
 
   const material = useMemo(
     () =>
-      new MeshStandardMaterial({
+      new MeshPhysicalMaterial({
         roughness: 0.5,
         metalness: 0.08,
         side: DoubleSide,
@@ -92,13 +94,19 @@ export function PartView({ id, data, color, display, look, edgeColor, accent, ho
 
   useEffect(() => {
     material.color.set(hole ? HOLE_COLOR : color);
+    // Modelling views keep a little shine on every part so shapes read well; Realistic shows the material as is.
+    const real = display === 'realistic';
+    material.metalness = real ? surface.metalness : Math.min(surface.metalness, 0.6);
+    material.roughness = real ? surface.roughness : Math.max(surface.roughness, 0.3);
+    material.clearcoat = real ? (surface.clearcoat ?? 0) : 0;
     material.emissive.set(look === 'none' ? '#000000' : look === 'hover' ? hover : accent);
     material.emissiveIntensity = look === 'selected' ? 0.28 : look === 'hover' ? 0.16 : 0;
     const see = display === 'xray' || hole;
     const wire = display === 'wireframe';
-    material.transparent = see;
-    material.opacity = hole ? 0.32 : see ? 0.28 : 1;
-    material.depthWrite = !see && !wire;
+    const clear = surface.opacity !== undefined && surface.opacity < 1;
+    material.transparent = see || clear;
+    material.opacity = hole ? 0.32 : see ? 0.28 : clear ? surface.opacity! : 1;
+    material.depthWrite = !see && !wire && !clear;
     material.colorWrite = !wire;
     material.needsUpdate = true;
     if (edges) {
@@ -107,7 +115,7 @@ export function PartView({ id, data, color, display, look, edgeColor, accent, ho
       m.linewidth = look === 'none' ? 1.15 : 2;
     }
     invalidate();
-  }, [material, edges, color, look, display, edgeColor, accent, hover, hole, invalidate]);
+  }, [material, edges, color, surface, look, display, edgeColor, accent, hover, hole, invalidate]);
 
   useEffect(() => {
     pickables.set(id, { partId: id, mesh: meshRef.current, data });
@@ -129,10 +137,10 @@ export function PartView({ id, data, color, display, look, edgeColor, accent, ho
     return liveMove.subscribe(apply);
   }, [id, invalidate]);
 
-  const showEdges = display !== 'shaded';
+  const showEdges = display !== 'shaded' && display !== 'realistic';
   return (
     <group ref={group} matrixAutoUpdate={false}>
-      <mesh ref={meshRef} geometry={geometry} material={material} userData={{ partId: id }} />
+      <mesh ref={meshRef} geometry={geometry} material={material} userData={{ partId: id }} castShadow={display === 'realistic'} receiveShadow={display === 'realistic'} />
       {edges && showEdges && <primitive object={edges} />}
     </group>
   );

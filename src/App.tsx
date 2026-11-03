@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { startKernel } from './kernel/client';
 import { lastDocId, loadDoc } from './io/storage';
 import { useStore } from './store/store';
-import { saveNow } from './app/actions';
+import { openSharedLink, saveNow } from './app/actions';
+import { initCloud } from './cloud/cloud';
 import { installShortcuts } from './app/shortcuts';
 import { LeftPanel } from './ui/LeftPanel';
 import { MenuBar } from './ui/MenuBar';
@@ -10,7 +11,9 @@ import { Modals } from './ui/Modals';
 import { Properties } from './ui/Properties';
 import { Ribbon } from './ui/Ribbon';
 import { Timeline } from './ui/Timeline';
+import { resolveTheme } from './ui/themes';
 import { Toasts } from './ui/Toasts';
+import { Home } from './ui/Home';
 import { Viewport } from './viewport/Viewport';
 import { viewApi } from './viewport/viewApi';
 
@@ -19,7 +22,7 @@ function useTheme() {
   useEffect(() => {
     const mq = matchMedia('(prefers-color-scheme: light)');
     const apply = () => {
-      const t = pref === 'system' ? (mq.matches ? 'light' : 'dark') : pref;
+      const t = resolveTheme(pref, mq.matches);
       document.documentElement.dataset.theme = t;
       useStore.setState({ resolvedTheme: t });
     };
@@ -36,6 +39,8 @@ function boot() {
   if (booted) return;
   booted = true;
   installShortcuts();
+  initCloud();
+  const shared = new URLSearchParams(location.search).get('share');
   void (async () => {
     try {
       const id = await lastDocId();
@@ -45,6 +50,10 @@ function boot() {
       console.warn('Could not restore the last document', e);
     }
     startKernel();
+    if (shared) {
+      history.replaceState(null, '', location.pathname);
+      void openSharedLink(shared);
+    }
   })();
 
   // Fit the view once, the first time geometry shows up.
@@ -81,6 +90,7 @@ export function App() {
         <Properties />
       </aside>
       <Timeline />
+      <Home />
       <Toasts />
       <Modals />
     </div>

@@ -1,9 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { IconFilePlus, IconTrash, IconX, IconRocket, IconCube } from '@tabler/icons-react';
+import { IconFilePlus, IconTrash, IconX, IconRocket, IconCube, IconHandMove, IconAxisX, IconDeviceDesktop } from '@tabler/icons-react';
+import { THEMES } from './themes';
 import { deleteDoc, listDocs, type DocMeta } from '../io/storage';
 import { IMPORT_LABEL } from '../io/importers';
 import { useStore } from '../store/store';
-import { newDocument, openDocument, openExample } from '../app/actions';
+import { addScript, newDocument, openDocument, openExample } from '../app/actions';
+import { LIBRARY } from '../model/library';
+import { DrawingSheet } from './DrawingSheet';
+import { AccountModal } from './AccountModal';
 import { mod } from './MenuBar';
 
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
@@ -100,7 +104,12 @@ const SHORTCUTS: [string, string][] = [
   ['Right drag, middle drag, or Shift + left drag', 'Pan'],
   ['Scroll', 'Zoom toward the cursor'],
   ['Click / Shift + click', 'Select / add to selection'],
-  ['W / E', 'Move arrows / rotate rings'],
+  ['Drag a part', 'Move it on the plate (Tinkercad style)'],
+  ['Arrow keys (Shift: ×10)', 'Nudge the selection by the snap distance'],
+  [`${mod}↑ / ${mod}↓ or Page Up / Down`, 'Lift / lower the selection'],
+  ['D', 'Drop the selection onto the plate'],
+  ['Shift / Alt while resizing', 'Keep proportions / resize from the center'],
+  ['Q / W / E', 'Resize box / move arrows / rotate rings'],
   ['F', 'Fit all'],
   ['G', 'Toggle grid'],
   ['H / Shift + H', 'Hide selected / show all'],
@@ -111,6 +120,7 @@ const SHORTCUTS: [string, string][] = [
   [`${mod}S / ${mod}O`, 'Save / open documents'],
   [`${mod}I`, 'Import a file'],
   ['Enter / Esc', 'Confirm / cancel the open dialog'],
+  [`${mod},`, 'Preferences: interaction style and theme'],
   ['?', 'This list'],
 ];
 
@@ -163,6 +173,85 @@ function About({ onClose }: { onClose: () => void }) {
   );
 }
 
+const SNAPS = [0, 0.1, 0.25, 0.5, 1, 2, 5, 10];
+
+function Settings({ onClose }: { onClose: () => void }) {
+  const prefs = useStore((s) => s.prefs);
+  const setPref = useStore((s) => s.setPref);
+  return (
+    <Modal title="Preferences" onClose={onClose} wide>
+      <div className="section-label">Interaction style</div>
+      <div className="choice-cards">
+        <button className={`choice-card${prefs.interaction === 'tinkercad' ? ' on' : ''}`} onClick={() => setPref('interaction', 'tinkercad')}>
+          <IconHandMove size={22} stroke={1.5} />
+          <strong>Tinkercad</strong>
+          <span>Drag parts around the plate. Squares resize, the cone lifts, three arcs rotate with a protractor. Arrow keys nudge, D drops onto the plate.</span>
+        </button>
+        <button className={`choice-card${prefs.interaction === 'pro' ? ' on' : ''}`} onClick={() => setPref('interaction', 'pro')}>
+          <IconAxisX size={22} stroke={1.5} />
+          <strong>Pro</strong>
+          <span>Like Onshape and Fusion: move arrows and rotate rings (W, E), resize box (Q), and exact values in the panel. Dragging a part orbits the view instead of moving it.</span>
+        </button>
+      </div>
+
+      <div className="section-label">Theme</div>
+      <div className="theme-grid">
+        {THEMES.map((t) => (
+          <button key={t.id} className={`theme-card${prefs.theme === t.id ? ' on' : ''}`} onClick={() => setPref('theme', t.id)} title={t.description}>
+            <span className="theme-swatch" style={{ background: t.swatch[0] }}>
+              <span style={{ background: t.swatch[1], borderColor: t.swatch[3] + '22' }}>
+                <i style={{ background: t.swatch[2] }} />
+                <b style={{ background: t.swatch[3] }} />
+              </span>
+            </span>
+            <span className="theme-name">{t.label}</span>
+          </button>
+        ))}
+        <button className={`theme-card${prefs.theme === 'system' ? ' on' : ''}`} onClick={() => setPref('theme', 'system')} title="Light or Midnight, following your system setting">
+          <span className="theme-swatch system">
+            <IconDeviceDesktop size={20} stroke={1.5} />
+          </span>
+          <span className="theme-name">Match system</span>
+        </button>
+      </div>
+
+      <div className="section-label">Snapping</div>
+      <div className="pref-row">
+        <span>Grid snap for moving and resizing</span>
+        <select className="input sm" value={prefs.snap} onChange={(e) => setPref('snap', Number(e.target.value))}>
+          {SNAPS.map((v) => (
+            <option key={v} value={v}>
+              {v === 0 ? 'Off' : `${v} mm`}
+            </option>
+          ))}
+        </select>
+      </div>
+    </Modal>
+  );
+}
+
+function Library({ onClose }: { onClose: () => void }) {
+  const cats = [...new Set(LIBRARY.map((l) => l.category))];
+  return (
+    <Modal title="Parts library" onClose={onClose} wide>
+      <p className="muted">Every part has sizes you can change, and its code is open: edit it like any script.</p>
+      {cats.map((c) => (
+        <div key={c}>
+          <div className="section-label">{c}</div>
+          <div className="template-grid lib-grid">
+            {LIBRARY.filter((l) => l.category === c).map((l) => (
+              <button key={l.id} className="template-card" onClick={() => addScript(l.id)}>
+                <strong>{l.label}</strong>
+                <span>{l.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </Modal>
+  );
+}
+
 export function Modals() {
   const modal = useStore((s) => s.modal);
   const setModal = useStore((s) => s.setModal);
@@ -170,5 +259,9 @@ export function Modals() {
   if (modal === 'documents') return <Documents onClose={close} />;
   if (modal === 'shortcuts') return <Shortcuts onClose={close} />;
   if (modal === 'about') return <About onClose={close} />;
+  if (modal === 'settings') return <Settings onClose={close} />;
+  if (modal === 'library') return <Library onClose={close} />;
+  if (modal === 'drawing') return <DrawingSheet onClose={close} />;
+  if (modal === 'account') return <AccountModal onClose={close} />;
   return null;
 }

@@ -14,7 +14,7 @@ import {
 } from '@tabler/icons-react';
 import { formatNum } from '../model/expr';
 import type { Variable } from '../model/types';
-import { partColor, partName, useStore } from '../store/store';
+import { partColor, partName, statusText, useStore } from '../store/store';
 import { exportAs } from '../app/actions';
 import { featureIcon } from './icons';
 
@@ -47,6 +47,7 @@ function Section({ title, count, children, actions, grow, defaultOpen = true }: 
 
 function FeatureList() {
   const doc = useStore((s) => s.doc);
+  const parts = useStore((s) => s.parts);
   const statuses = useStore((s) => s.statuses);
   const draft = useStore((s) => s.draft);
   const editFeature = useStore((s) => s.editFeature);
@@ -105,7 +106,7 @@ function FeatureList() {
                   data-feature-row
                   className={`row${editing ? ' on' : ''}${rolledBack ? ' rolled' : ''}${f.suppressed ? ' suppressed' : ''}${st?.state === 'error' && !rolledBack ? ' error' : ''}`}
                   onDoubleClick={() => editFeature(f.id)}
-                  title={st?.message ?? (rolledBack ? 'Rolled back: drag the bar below this to rebuild it' : 'Double-click to edit')}
+                  title={statusText(st, { doc, parts }) ?? (rolledBack ? 'Rolled back: drag the bar below this to rebuild it' : 'Double-click to edit')}
                 >
                   <Icon size={15} stroke={1.6} />
                   {renaming === f.id ? (

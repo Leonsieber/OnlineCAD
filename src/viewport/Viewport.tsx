@@ -23,6 +23,8 @@ import { addPrimitive, deleteSelection, duplicateSelection, hideSelection, impor
 import { Scene } from './Scene';
 import { ViewCube } from './ViewCube';
 import { viewApi } from './viewApi';
+import { PrintCheckCard } from './PrintCheck';
+import { AiPanel } from '../ui/AiPanel';
 
 export function Viewport() {
   return (
@@ -32,6 +34,8 @@ export function Viewport() {
       </Canvas>
       <ViewCube />
       <Hud />
+      <PrintCheckCard />
+      <AiPanel />
       <EmptyState />
       <KernelOverlay />
       <ViewportMenu />
@@ -53,6 +57,7 @@ function Hud() {
   const gizmo = useStore((s) => s.gizmo);
   const setGizmo = useStore((s) => s.setGizmo);
   const sel = useStore((s) => s.sel);
+  const style = useStore((s) => s.prefs.interaction);
   const showGizmoModes = (!draft && sel.some((x) => x.kind === 'part')) || draft?.feature.type === 'primitive';
   return (
     <div className="hud">
@@ -66,22 +71,30 @@ function Hud() {
           ))}
         </div>
       )}
-      {draft?.field && <div className="hud-note">Click {draft.field === 'edges' ? 'edges' : draft.field === 'faces' ? 'faces' : 'parts'} to add or remove them</div>}
-      {showGizmoModes && (
-        <div className="hud-group">
-          <button className={gizmo === 'handles' ? 'on' : ''} title="Resize handles: drag squares to resize, the cone to lift, the dot to spin (Q)" onClick={() => setGizmo('handles')}>
-            <IconResize size={15} stroke={1.7} />
-            <span>Handles</span>
-          </button>
+      {draft?.field && (
+        <div className="hud-note">
+          {draft.feature.type === 'sketch' ? 'Click a flat face to sketch on it, or pick a plane on the right' : `Click ${draft.field === 'edges' ? 'edges' : draft.field === 'faces' ? 'faces' : 'parts'} to add or remove them`}
+        </div>
+      )}
+      {showGizmoModes && style === 'pro' && (
+        <div className="hud-group" role="radiogroup" aria-label="Transform tool">
           <button className={gizmo === 'translate' ? 'on' : ''} title="Move arrows (W)" onClick={() => setGizmo('translate')}>
             <IconArrowsMove size={15} stroke={1.7} />
+            <span>Move</span>
           </button>
           <button className={gizmo === 'rotate' ? 'on' : ''} title="Rotate rings (E)" onClick={() => setGizmo('rotate')}>
             <IconRotate size={15} stroke={1.7} />
+            <span>Rotate</span>
+          </button>
+          <button className={gizmo === 'handles' ? 'on' : ''} title="Resize box (Q)" onClick={() => setGizmo('handles')}>
+            <IconResize size={15} stroke={1.7} />
+            <span>Resize</span>
           </button>
         </div>
       )}
-      {showGizmoModes && gizmo === 'handles' && <div className="hud-tip">Drag the part to move it · Shift keeps proportions</div>}
+      {showGizmoModes && style === 'tinkercad' && (
+        <div className="hud-tip">Drag to move · Shift keeps proportions · Alt resizes from the center · Arrow keys nudge · D drops to the plate</div>
+      )}
       <div className="hud-group">
         <button title="Fit all (F)" onClick={() => viewApi.fitAll()}>
           <IconFocusCentered size={15} stroke={1.7} />
@@ -96,7 +109,8 @@ function EmptyState() {
   const features = useStore((s) => s.doc.features.length);
   const draft = useStore((s) => s.draft);
   const kernel = useStore((s) => s.kernel);
-  if (parts.length || features || draft || kernel !== 'ready') return null;
+  const panel = useStore((s) => s.panel);
+  if (parts.length || features || draft || panel || kernel !== 'ready') return null;
   return (
     <div className="empty-state">
       <div className="empty-card">

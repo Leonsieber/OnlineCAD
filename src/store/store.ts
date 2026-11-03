@@ -2,20 +2,23 @@ import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import { create } from 'zustand';
 import { currentSeq } from '../kernel/seq';
 import type { EvalResult, FeatureStatus, MeshData, PartResult } from '../kernel/protocol';
-import { EDGE_INFO_STRIDE, FACE_INFO_STRIDE } from '../kernel/protocol';
+import { EDGE_INFO_STRIDE, FACE_INFO_STRIDE, resolvePartRefs } from '../kernel/protocol';
 import {
   createDeleteParts,
   createDocument,
   createTransform,
+  isPlaced,
   PART_COLORS,
   referencedParts,
 } from '../model/defaults';
 import { activeFeatures, insertFeature, removeFeatures, replaceFeature, setRollback } from '../model/docOps';
 import { evalNum } from '../model/expr';
 import { hashString, newId } from '../model/hash';
-import type { CadDocument, EdgeRef, FaceRef, Feature, PartProps, Placement, TransformFeature, Vec3 } from '../model/types';
+import type { CadDocument, EdgeRef, FaceRef, Feature, PartProps, Placement, SketchFrame, TransformFeature, Vec3 } from '../model/types';
 import { liveMove } from '../viewport/liveMove';
 import { applyResize } from './resize';
+import { THEME_IDS } from '../ui/themes';
+import type { ThemeId, ThemePref } from '../ui/themes';
 
 export type SelKind = 'part' | 'face' | 'edge';
 export interface SelItem {
@@ -25,12 +28,18 @@ export interface SelItem {
 }
 export const sameSel = (a: SelItem, b: SelItem) => a.kind === b.kind && a.part === b.part && a.index === b.index;
 
-export type DisplayMode = 'shadedEdges' | 'shaded' | 'wireframe' | 'xray';
-export type ThemePref = 'dark' | 'light' | 'system';
+export type DisplayMode = 'shadedEdges' | 'shaded' | 'wireframe' | 'xray' | 'realistic';
+export type { ThemePref } from '../ui/themes';
+/** Tinkercad: handles, drag parts around the plate. Pro: arrow and ring gizmo, exact values (Onshape / Fusion). */
+export type InteractionStyle = 'tinkercad' | 'pro';
 export type Projection = 'perspective' | 'orthographic';
 export type RibbonTab = 'solid' | 'sketch' | 'mesh' | 'inspect' | 'view';
-export type ModalName = 'documents' | 'shortcuts' | 'about' | null;
+export type ModalName = 'documents' | 'shortcuts' | 'about' | 'settings' | 'library' | 'drawing' | 'account' | null;
 export type GizmoMode = 'handles' | 'translate' | 'rotate';
+/** home = the projects dashboard, shown over the editor (which stays mounted underneath). */
+export type Screen = 'home' | 'editor';
+/** Extra panel docked on the right of the editor. */
+export type SidePanel = 'ai' | null;
 
 export interface Draft {
   feature: Feature;
@@ -52,9 +61,16 @@ export interface Prefs {
   projection: Projection;
   grid: boolean;
   snap: number;
+  interaction: InteractionStyle;
 }
 
-const DEFAULT_PREFS: Prefs = { theme: 'dark', display: 'shadedEdges', projection: 'perspective', grid: true, snap: 1 };
+const DEFAULT_PREFS: Prefs = { theme: 'dark', display: 'shadedEdges', projection: 'perspective', grid: true, snap: 1, interaction: 'tinkercad' };
+
+/** The theme index.html already applied before the first paint. */
+function initialTheme(): ThemeId {
+  const t = document.documentElement.dataset.theme as ThemeId | undefined;
+  return t && THEME_IDS.includes(t) ? t : 'dark';
+}
 
 function loadPrefs(): Prefs {
   try {
@@ -101,11 +117,13 @@ export interface State {
   evalMs: number;
 
   prefs: Prefs;
-  resolvedTheme: 'dark' | 'light';
+  resolvedTheme: ThemeId;
   filter: SelKind;
   tab: RibbonTab;
   /** handles = Tinkercad resize handles; translate/rotate = arrow and ring gizmo. */
   gizmo: GizmoMode;
+  screen: Screen;
+  panel: SidePanel;
   modal: ModalName;
   ctxMenu: { x: number; y: number; part: string | null } | null;
   toasts: Toast[];
@@ -148,6 +166,8 @@ export interface State {
   setFilter(f: SelKind): void;
   setTab(t: RibbonTab): void;
   setGizmo(m: GizmoMode): void;
+  setScreen(screen: Screen): void;
+  setPanel(panel: SidePanel): void;
   setModal(m: ModalName): void;
   setCtxMenu(m: State['ctxMenu']): void;
 
@@ -174,10 +194,12 @@ export const useStore = create<State>()((set, get) => ({
   evalMs: 0,
 
   prefs: loadPrefs(),
-  resolvedTheme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+  resolvedTheme: initialTheme(),
   filter: 'part',
   tab: 'solid',
-  gizmo: 'handles',
+  gizmo: loadPrefs().interaction === 'pro' ? 'translate' : 'handles',
+  screen: 'home',
+  panel: null,
   modal: null,
   ctxMenu: null,
   toasts: [],
@@ -256,7 +278,7 @@ export const useStore = create<State>()((set, get) => ({
     if (!draft) return;
     const f = draft.feature;
     get().commit((d) => (draft.isNew ? insertFeature(d, f, draft.index) : replaceFeature(d, f)));
-    const sel: SelItem[] = draft.isNew && f.type === 'primitive' ? [{ kind: 'part', part: f.id, index: -1 }] : [];
+    const sel: SelItem[] = draft.isNew && isPlaced(f) ? [{ kind: 'part', part: f.id, index: -1 }] : [];
     set({ draft: null, sel, filter: 'part' });
   },
   cancelDraft() {
@@ -287,7 +309,7 @@ export const useStore = create<State>()((set, get) => ({
     // Primitives nothing else depends on can simply be removed from the history.
     const removable = ids.every((id) => {
       const i = active.findIndex((f) => f.id === id);
-      return i >= 0 && active[i].type === 'primitive' && !active.slice(i + 1).some((g) => referencedParts(g).includes(id));
+      return i >= 0 && isPlaced(active[i]) && !active.slice(i + 1).some((g) => referencedParts(g).includes(id));
     });
     if (removable) get().commit((d) => removeFeatures(d, ids));
     else get().commit((d) => insertFeature(d, createDeleteParts(ids, d.features)));
@@ -302,7 +324,7 @@ export const useStore = create<State>()((set, get) => ({
 
     if (s.draft) {
       const f = s.draft.feature;
-      if (f.type === 'primitive' && ids.length === 1 && ids[0] === f.id) {
+      if (isPlaced(f) && ids.length === 1 && ids[0] === f.id) {
         const placement = composePlacement(delta, f.placement, scope);
         if (placement) {
           set({ draft: { ...s.draft, feature: { ...f, placement } } });
@@ -315,20 +337,20 @@ export const useStore = create<State>()((set, get) => ({
     const active = activeFeatures(s.doc);
     const free = ids.every((id) => {
       const i = active.findIndex((f) => f.id === id);
-      return i >= 0 && active[i].type === 'primitive' && !active.slice(i + 1).some((g) => referencedParts(g).includes(id));
+      return i >= 0 && isPlaced(active[i]) && !active.slice(i + 1).some((g) => referencedParts(g).includes(id));
     });
     if (free) {
       const placements = new Map<string, Placement>();
       for (const id of ids) {
         const f = active.find((x) => x.id === id);
-        const p = f?.type === 'primitive' ? composePlacement(delta, f.placement, scope) : null;
+        const p = isPlaced(f) ? composePlacement(delta, f.placement, scope) : null;
         if (!p) break;
         placements.set(id, p);
       }
       if (placements.size === ids.length) {
         s.commit((d) => ({
           ...d,
-          features: d.features.map((f) => (f.type === 'primitive' && placements.has(f.id) ? { ...f, placement: placements.get(f.id)! } : f)),
+          features: d.features.map((f) => (isPlaced(f) && placements.has(f.id) ? { ...f, placement: placements.get(f.id)! } : f)),
         }));
         return finish();
       }
@@ -393,6 +415,15 @@ export const useStore = create<State>()((set, get) => ({
   pick(item) {
     const { draft } = get();
     if (!draft?.field) return;
+    if (draft.feature.type === 'sketch' && draft.field === 'faces') {
+      // Choosing the plane for a new sketch: a flat face gives the frame.
+      const fp = item.kind === 'face' ? fingerprintOf(item) : null;
+      if (!fp) return;
+      if (fp[7] !== 1) return get().toast('Pick a flat face to sketch on', 'error');
+      const frame = faceFrame(fp);
+      set({ draft: { ...draft, field: null, feature: { ...draft.feature, plane: 'face', offset: 0, frame, face: { part: item.part, index: item.index, fp } } } });
+      return;
+    }
     const key = draft.field;
     const kind = fieldKind(key);
     if (kind !== item.kind) return;
@@ -407,7 +438,9 @@ export const useStore = create<State>()((set, get) => ({
       if (!fp) return f;
       const list = (rec[key] as (EdgeRef | FaceRef)[]) ?? [];
       const existing = list.findIndex((r) => r.part === item.part && fpDistance(r.fp, fp) < 1e-4);
-      const next = existing >= 0 ? list.filter((_, i) => i !== existing) : [...list, { part: item.part, index: item.index, fp }];
+      const bbox = get().parts.find((p) => p.id === item.part)?.bbox;
+      const box = bbox && ([[...bbox[0]], [...bbox[1]]] as [Vec3, Vec3]);
+      const next = existing >= 0 ? list.filter((_, i) => i !== existing) : [...list, { part: item.part, index: item.index, fp, ...(box && { box }) }];
       return { ...f, [key]: next } as Feature;
     });
   },
@@ -415,7 +448,9 @@ export const useStore = create<State>()((set, get) => ({
   setPref(key, value) {
     const prefs = { ...get().prefs, [key]: value };
     savePrefs(prefs);
-    set({ prefs });
+    // Each style starts in its own tool: handles for Tinkercad, the move arrows for Pro.
+    if (key === 'interaction') set({ prefs, gizmo: value === 'pro' ? 'translate' : 'handles' });
+    else set({ prefs });
   },
   setFilter(filter) {
     set({ filter, sel: get().sel.filter((x) => x.kind === filter) });
@@ -425,6 +460,12 @@ export const useStore = create<State>()((set, get) => ({
   },
   setGizmo(gizmo) {
     set({ gizmo });
+  },
+  setScreen(screen) {
+    set({ screen, modal: null, ctxMenu: null });
+  },
+  setPanel(panel) {
+    set({ panel });
   },
   setModal(modal) {
     set({ modal, ctxMenu: null });
@@ -477,6 +518,12 @@ export function partName(id: string, s: Pick<State, 'doc' | 'parts'> = useStore.
   return s.doc.parts[id]?.name ?? s.parts.find((p) => p.id === id)?.label ?? 'Part';
 }
 
+/** A feature's status message with the parts it mentions called by their names in the Parts list. */
+export function statusText(st: FeatureStatus | undefined, s: Pick<State, 'doc' | 'parts'> = useStore.getState()): string | undefined {
+  if (!st?.message) return st?.message;
+  return resolvePartRefs(st.message, (id) => s.doc.parts[id]?.name ?? s.parts.find((p) => p.id === id)?.label);
+}
+
 export function meshOf(partId: string, s: Pick<State, 'parts' | 'meshes'> = useStore.getState()): MeshData | undefined {
   const p = s.parts.find((x) => x.id === partId);
   return p ? s.meshes.get(p.key) : undefined;
@@ -488,6 +535,16 @@ export function fingerprintOf(item: SelItem): number[] | null {
   if (item.kind === 'edge') return Array.from(m.edgeInfo.subarray(item.index * EDGE_INFO_STRIDE, (item.index + 1) * EDGE_INFO_STRIDE));
   if (item.kind === 'face') return Array.from(m.faceInfo.subarray(item.index * FACE_INFO_STRIDE, (item.index + 1) * FACE_INFO_STRIDE));
   return null;
+}
+
+/**
+ * A sketch frame on a flat face: origin at the face center, x level with the ground where possible,
+ * so y (normal × x) points up on walls, like the Front and Right planes.
+ */
+export function faceFrame(fp: number[]): SketchFrame {
+  const n = new Vector3(fp[3], fp[4], fp[5]).normalize();
+  const x = Math.abs(n.z) > 0.99 ? new Vector3(1, 0, 0).addScaledVector(n, -n.x).normalize() : new Vector3(0, 0, 1).cross(n).normalize();
+  return { origin: [fp[0], fp[1], fp[2]], xDir: x.toArray() as Vec3, normal: n.toArray() as Vec3 };
 }
 
 export function fpDistance(a: number[], b: number[]): number {

@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { IconAlertTriangle, IconLoader2, IconPlayerPlay, IconPlayerSkipBack, IconPlayerSkipForward, IconPlayerStop, IconCircleCheck, IconMagnet } from '@tabler/icons-react';
-import { useStore } from '../store/store';
+import { statusText, useStore } from '../store/store';
 import { featureIcon } from './icons';
 
 const SNAPS = [0, 0.1, 0.5, 1, 2, 5, 10];
@@ -59,7 +59,7 @@ export function Timeline() {
             <button
               key={f.id}
               className={`tl-chip${i >= doc.rollback ? ' rolled' : ''}${st?.state === 'error' && i < doc.rollback ? ' error' : ''}${f.suppressed ? ' suppressed' : ''}`}
-              title={`${f.name}${st?.message ? ` — ${st.message}` : ''}\nClick: roll here · Double-click: edit`}
+              title={`${f.name}${st?.message ? ` — ${statusText(st)}` : ''}\nClick: roll here · Double-click: edit`}
               onClick={() => setRollback(i + 1)}
               onDoubleClick={() => editFeature(f.id)}
             >

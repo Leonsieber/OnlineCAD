@@ -1,8 +1,12 @@
 import { useStore } from '../store/store';
+import { isSketching, sketchRedo, sketchUndo } from '../sketch/sketchUi';
+import { toggleMeasure } from '../viewport/Measure';
 import { viewApi } from '../viewport/viewApi';
 import {
   deleteSelection,
+  dropToPlate,
   duplicateSelection,
+  nudgeSelection,
   groupSelection,
   hideSelection,
   importFile,
@@ -26,7 +30,13 @@ export function installShortcuts() {
     const key = e.key.toLowerCase();
 
     if (mod) {
-      if (key === 's') {
+      if (key === ',') {
+        e.preventDefault();
+        s.setModal('settings');
+      } else if (key === 'k') {
+        e.preventDefault();
+        s.setPanel(s.panel === 'ai' ? null : 'ai');
+      } else if (key === 's') {
         e.preventDefault();
         void saveNow();
       } else if (key === 'o') {
@@ -39,10 +49,12 @@ export function installShortcuts() {
         return; // let inputs keep their own undo, select-all, and copy
       } else if (key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        s.undo();
+        if (isSketching()) sketchUndo();
+        else s.undo();
       } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
         e.preventDefault();
-        s.redo();
+        if (isSketching()) sketchRedo();
+        else s.redo();
       } else if (key === 'd') {
         e.preventDefault();
         duplicateSelection();
@@ -53,10 +65,16 @@ export function installShortcuts() {
       } else if (key === 'a') {
         e.preventDefault();
         selectAll();
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // Ctrl+Up/Down lifts and lowers, as in Tinkercad.
+        e.preventDefault();
+        nudgeSelection(0, 0, (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
       }
       return;
     }
     if (typing || s.modal || e.altKey) return;
+    // The sketch editor has its own keys (tools, constraints, Esc); only Enter (finish) passes through.
+    if (isSketching() && e.key !== 'Enter') return;
 
     switch (e.key) {
       case 'Escape':
@@ -95,6 +113,24 @@ export function installShortcuts() {
       case 'h':
         hideSelection(true);
         break;
+      case 'd':
+      case 'D':
+        dropToPlate();
+        break;
+      case 'ArrowUp':
+      case 'ArrowDown':
+      case 'ArrowLeft':
+      case 'ArrowRight': {
+        e.preventDefault();
+        const k = e.shiftKey ? 10 : 1;
+        nudgeSelection(e.key === 'ArrowRight' ? k : e.key === 'ArrowLeft' ? -k : 0, e.key === 'ArrowUp' ? k : e.key === 'ArrowDown' ? -k : 0);
+        break;
+      }
+      case 'PageUp':
+      case 'PageDown':
+        e.preventDefault();
+        nudgeSelection(0, 0, (e.key === 'PageUp' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+        break;
       case 'H':
         showAllParts();
         break;
@@ -109,6 +145,10 @@ export function installShortcuts() {
         break;
       case '?':
         s.setModal('shortcuts');
+        break;
+      case 'm':
+      case 'M':
+        if (!s.draft) toggleMeasure();
         break;
     }
   });

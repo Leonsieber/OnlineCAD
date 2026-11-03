@@ -23,8 +23,8 @@ import { kernel } from '../kernel/client';
 import { EDGE_INFO_STRIDE, FACE_INFO_STRIDE, type MeasureResult } from '../kernel/protocol';
 import { BOOLEAN_LABELS, PART_COLORS, PRIMITIVES, featureLabel } from '../model/defaults';
 import { evalNum, formatNum } from '../model/expr';
-import type { EdgeRef, FaceRef, Feature, NumExpr } from '../model/types';
-import { meshOf, partColor, partName, useStore, type Draft } from '../store/store';
+import type { EdgeRef, FaceRef, Feature, NumExpr, ScriptFeature, SolidOp } from '../model/types';
+import { meshOf, partColor, partName, statusText, useStore, type Draft } from '../store/store';
 import {
   deleteSelection,
   duplicateSelection,
@@ -37,10 +37,13 @@ import {
 } from '../app/actions';
 import { Field, NumInput, RefField, Segmented, Switch, Vec3Input, type Chip } from './controls';
 import { featureIcon } from './icons';
+import { SketchPanel } from './SketchPanel';
+import { DEFAULT_MATERIAL, MATERIALS, materialDef } from '../model/materials';
 
 export function Properties() {
   const draft = useStore((s) => s.draft);
   const sel = useStore((s) => s.sel);
+  if (draft?.feature.type === 'sketch') return <SketchPanel draft={draft} />;
   if (draft) return <FeatureDialog draft={draft} />;
   if (sel.length) return <SelectionInfo />;
   return <DocumentInfo />;
@@ -64,6 +67,8 @@ function Panel({ title, icon, children, actions }: { title: ReactNode; icon?: Re
 function FeatureDialog({ draft }: { draft: Draft }) {
   const f = draft.feature;
   const status = useStore((s) => s.statuses[f.id]);
+  const doc = useStore((s) => s.doc);
+  const parts = useStore((s) => s.parts);
   const busy = useStore((s) => s.busy);
   const patch = useStore((s) => s.patchDraft);
   const confirm = useStore((s) => s.confirmDraft);
@@ -86,13 +91,13 @@ function FeatureDialog({ draft }: { draft: Draft }) {
         {status?.warning && (
           <div className="banner caution">
             <IconAlertTriangle size={16} />
-            <span>{status.message}</span>
+            <span>{statusText(status, { doc, parts })}</span>
           </div>
         )}
         {status?.state === 'error' && (
           <div className={`banner ${status.incomplete ? 'info' : 'error'}`}>
             {status.incomplete ? <IconInfoCircle size={16} /> : <IconAlertTriangle size={16} />}
-            <span>{status.message}</span>
+            <span>{statusText(status, { doc, parts })}</span>
           </div>
         )}
       </div>
@@ -336,7 +341,243 @@ function FeatureFields({ draft, set }: { draft: Draft; set: (p: Partial<Feature>
       );
     case 'deleteParts':
       return <PartsRef draft={draft} field="parts" label="Parts to delete" ids={f.parts} onChange={(parts) => set({ parts } as Partial<Feature>)} />;
+    case 'sketch':
+      return null;
+    case 'script':
+      return <ScriptFields f={f} set={set} />;
+    case 'meshEdit':
+      return (
+        <>
+          <PartsRef draft={draft} field="parts" label="Parts" ids={f.parts} onChange={(parts) => set({ parts } as Partial<Feature>)} />
+          {f.op !== 'toMesh' && (
+            <Field label={f.op === 'subdivide' ? 'Levels' : 'Passes'}>
+              <NumInput autoFocus value={f.amount} integer min={1} step={1} onChange={(amount) => set({ amount } as Partial<Feature>)} />
+            </Field>
+          )}
+          <p className="hint">
+            {f.op === 'toMesh'
+              ? 'Turns solids into triangles so you can sculpt them. Solid tools (fillet, shell) no longer apply after this.'
+              : f.op === 'subdivide'
+                ? 'Each level splits every triangle into four and rounds the shape (Loop subdivision).'
+                : 'Smooths bumps and noise without shrinking the part.'}
+          </p>
+        </>
+      );
+    case 'sculpt':
+      return (
+        <>
+          <Field label="Strokes">
+            <span className="readonly">{f.strokes.length}</span>
+          </Field>
+          <div className="action-grid">
+            <button className="btn" disabled={!f.strokes.length} onClick={() => set({ strokes: f.strokes.slice(0, -1) } as Partial<Feature>)}>
+              Remove last stroke
+            </button>
+            <button className="btn" disabled={!f.strokes.length} onClick={() => set({ strokes: [] } as Partial<Feature>)}>
+              Clear all
+            </button>
+          </div>
+          <p className="hint">Pick a brush in the Mesh tab and drag over the part to add strokes.</p>
+        </>
+      );
+    case 'extrude':
+      return (
+        <>
+          <SketchSelect draft={draft} label="Sketch" value={f.sketch} onChange={(sketch) => set({ sketch } as Partial<Feature>)} />
+          <OpField draft={draft} op={f.op} targets={f.targets} set={set} />
+          <Segmented
+            value={f.extent}
+            options={[
+              { value: 'one', label: 'One way' },
+              { value: 'symmetric', label: 'Symmetric' },
+              { value: 'both', label: 'Two ways' },
+            ]}
+            onChange={(extent) => set({ extent } as Partial<Feature>)}
+          />
+          <Field label={f.extent === 'symmetric' ? 'Total depth' : 'Depth'}>
+            <NumInput autoFocus value={f.distance} step={1} onChange={(distance) => set({ distance } as Partial<Feature>)} />
+          </Field>
+          {f.extent === 'both' && (
+            <Field label="Other side">
+              <NumInput value={f.distance2} step={1} onChange={(distance2) => set({ distance2 } as Partial<Feature>)} />
+            </Field>
+          )}
+          <Switch checked={f.flip} onChange={(flip) => set({ flip } as Partial<Feature>)} label="Flip direction" />
+        </>
+      );
+    case 'revolve': {
+      const sk = sketchById(f.sketch);
+      const lines = sk?.entities.filter((e) => e.type === 'line') ?? [];
+      return (
+        <>
+          <SketchSelect draft={draft} label="Sketch" value={f.sketch} onChange={(sketch) => set({ sketch } as Partial<Feature>)} />
+          <OpField draft={draft} op={f.op} targets={f.targets} set={set} />
+          <Field label="Axis">
+            <select className="select" value={f.axis} onChange={(e) => set({ axis: e.target.value } as Partial<Feature>)}>
+              <option value="X">Sketch X axis</option>
+              <option value="Y">Sketch Y axis</option>
+              {lines.map((l, i) => (
+                <option key={l.id} value={l.id}>
+                  {l.construction ? 'Construction line' : 'Line'} {i + 1}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Angle">
+            <NumInput autoFocus value={f.angle} unit="°" step={15} onChange={(angle) => set({ angle } as Partial<Feature>)} />
+          </Field>
+          <p className="hint">Draw a construction line in the sketch to revolve around it. The profile must not cross the axis.</p>
+        </>
+      );
+    }
+    case 'sweep':
+      return (
+        <>
+          <SketchSelect draft={draft} label="Profile" value={f.sketch} onChange={(sketch) => set({ sketch } as Partial<Feature>)} />
+          <SketchSelect draft={draft} label="Path" value={f.path} onChange={(path) => set({ path } as Partial<Feature>)} />
+          <OpField draft={draft} op={f.op} targets={f.targets} set={set} />
+          <p className="hint">Sketch the closed profile on a plane across the start of the path. The path is a chain of lines and arcs in another sketch.</p>
+        </>
+      );
+    case 'loft':
+      return (
+        <>
+          {f.sketches.map((id, i) => (
+            <SketchSelect
+              key={i}
+              draft={draft}
+              label={`Profile ${i + 1}`}
+              value={id}
+              onChange={(v) => set({ sketches: f.sketches.map((x, j) => (j === i ? v : x)).filter(Boolean) } as Partial<Feature>)}
+            />
+          ))}
+          <SketchSelect draft={draft} label="Add profile" value="" onChange={(v) => v && set({ sketches: [...f.sketches, v] } as Partial<Feature>)} />
+          <Switch checked={f.ruled} onChange={(ruled) => set({ ruled } as Partial<Feature>)} label="Straight sides (ruled)" />
+          <OpField draft={draft} op={f.op} targets={f.targets} set={set} />
+          <p className="hint">Each profile is one closed outline, usually on parallel planes (use the plane offset in the sketch).</p>
+        </>
+      );
   }
+}
+
+function ScriptFields({ f, set }: { f: ScriptFeature; set: (p: Partial<Feature>) => void }) {
+  const [code, setCode] = useState(f.code);
+  useEffect(() => setCode(f.code), [f.id, f.code]);
+  const dirty = code !== f.code;
+  const apply = () => dirty && set({ code } as Partial<Feature>);
+  return (
+    <>
+      <div className="section-label">Parameters</div>
+      {f.params.map((prm, i) => (
+        <div key={i} className="param-row">
+          <input
+            className="param-name"
+            value={prm.name}
+            aria-label="Parameter name"
+            onChange={(e) => set({ params: f.params.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) } as Partial<Feature>)}
+          />
+          <NumInput value={prm.value} onChange={(value) => set({ params: f.params.map((x, j) => (j === i ? { ...x, value } : x)) } as Partial<Feature>)} />
+          <button className="icon-btn sm" aria-label={`Remove ${prm.name}`} onClick={() => set({ params: f.params.filter((_, j) => j !== i) } as Partial<Feature>)}>
+            <IconX size={13} />
+          </button>
+        </div>
+      ))}
+      <button className="btn sm" onClick={() => set({ params: [...f.params, { name: `p${f.params.length + 1}`, value: 10 }] } as Partial<Feature>)}>
+        Add parameter
+      </button>
+      <div className="section-label">
+        Code <span className="muted">· JavaScript, replicad API</span>
+      </div>
+      <textarea
+        className="code-input"
+        spellCheck={false}
+        value={code}
+        aria-label="Script code"
+        onChange={(e) => setCode(e.target.value)}
+        onBlur={apply}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            apply();
+          }
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            const t = e.currentTarget;
+            const at = t.selectionStart;
+            setCode(code.slice(0, at) + '  ' + code.slice(t.selectionEnd));
+            requestAnimationFrame(() => t.setSelectionRange(at + 2, at + 2));
+          }
+        }}
+      />
+      <div className="code-bar">
+        <button className="btn sm primary" disabled={!dirty} onClick={apply}>
+          Run (Ctrl+Enter)
+        </button>
+        <a href="https://replicad.xyz/docs/api/" target="_blank" rel="noreferrer">
+          replicad API docs
+        </a>
+      </div>
+      <div className="section-label">Placement</div>
+      <Field label="Position">
+        <Vec3Input value={f.placement.position} onChange={(position) => set({ placement: { ...f.placement, position } } as Partial<Feature>)} />
+      </Field>
+      <Field label="Rotation">
+        <Vec3Input value={f.placement.rotation} unit="°" step={15} onChange={(rotation) => set({ placement: { ...f.placement, rotation } } as Partial<Feature>)} />
+      </Field>
+    </>
+  );
+}
+
+/** Sketches that come before the feature being edited. */
+function useSketchesBefore(draft: Draft) {
+  const doc = useStore((s) => s.doc);
+  const upto = draft.isNew ? draft.index : doc.features.findIndex((x) => x.id === draft.feature.id);
+  return doc.features.slice(0, upto < 0 ? doc.features.length : upto).filter((x) => x.type === 'sketch');
+}
+
+function sketchById(id: string) {
+  const f = useStore.getState().doc.features.find((x) => x.id === id);
+  return f?.type === 'sketch' ? f : undefined;
+}
+
+function SketchSelect({ draft, label, value, onChange }: { draft: Draft; label: string; value: string; onChange: (id: string) => void }) {
+  const sketches = useSketchesBefore(draft);
+  return (
+    <Field label={label}>
+      <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{sketches.length ? 'Choose a sketch' : 'No sketches yet'}</option>
+        {sketches.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+function OpField({ draft, op, targets, set }: { draft: Draft; op: SolidOp; targets: string[]; set: (p: Partial<Feature>) => void }) {
+  return (
+    <>
+      <Segmented
+        value={op}
+        options={[
+          { value: 'new', label: 'New' },
+          { value: 'add', label: 'Add' },
+          { value: 'cut', label: 'Cut' },
+          { value: 'intersect', label: 'Intersect' },
+        ]}
+        onChange={(v) => set({ op: v, ...(v === 'cut' && draft.isNew ? { flip: true } : {}) } as Partial<Feature>)}
+      />
+      {op !== 'new' && (
+        <>
+          <PartsRef draft={draft} field="targets" label={op === 'add' ? 'Merge with' : op === 'cut' ? 'Cut from' : 'Intersect with'} ids={targets} onChange={(t) => set({ targets: t } as Partial<Feature>)} />
+          {!targets.length && <p className="hint">Empty means every part the new shape touches.</p>}
+        </>
+      )}
+    </>
+  );
 }
 
 // ---------------------------------------------------------------- selection info
@@ -458,6 +699,28 @@ function PartInfo({ id }: { id: string }) {
           <input type="color" value={color} onChange={(e) => setProps(id, { color: e.target.value })} />
         </label>
       </div>
+      <div className="section-label">Material</div>
+      <select
+        className="select"
+        value={doc.parts[id]?.material ?? DEFAULT_MATERIAL}
+        aria-label="Material"
+        onChange={(e) => {
+          const mat = materialDef(e.target.value);
+          setProps(id, { material: e.target.value, color: mat.color });
+        }}
+      >
+        {(['Plastic', 'Metal', 'Other'] as const).map((g) => (
+          <optgroup key={g} label={g}>
+            {Object.entries(MATERIALS)
+              .filter(([, m]) => m.group === g)
+              .map(([k, m]) => (
+                <option key={k} value={k}>
+                  {m.label}
+                </option>
+              ))}
+          </optgroup>
+        ))}
+      </select>
       <div className="section-label">Size</div>
       <div className="stats">
         <Stat label="X" value={fmt(size[0], 'mm')} />
@@ -471,7 +734,7 @@ function PartInfo({ id }: { id: string }) {
         <div className="stats">
           <Stat label="Volume" value={m.volume >= 1000 ? fmt(m.volume / 1000, 'cm³') : fmt(m.volume, 'mm³')} />
           <Stat label="Area" value={m.area >= 10000 ? fmt(m.area / 100, 'cm²') : fmt(m.area, 'mm²')} />
-          <Stat label="Mass (PLA)" value={fmt((m.volume / 1000) * 1.24, 'g', 1)} />
+          <Stat label={`Mass (${materialDef(doc.parts[id]?.material).label})`} value={fmt((m.volume / 1000) * materialDef(doc.parts[id]?.material).density, 'g', 1)} />
         </div>
       ) : (
         <p className="muted">

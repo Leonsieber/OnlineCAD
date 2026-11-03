@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import * as Menubar from '@radix-ui/react-menubar';
-import { IconChevronRight, IconCloudCheck, IconDeviceDesktop, IconDeviceFloppy, IconLoader2, IconMoon, IconSun, IconUser } from '@tabler/icons-react';
+import { IconChevronRight, IconCloudCheck, IconDeviceFloppy, IconLoader2, IconMoon, IconSettings, IconSun, IconUser } from '@tabler/icons-react';
 import { EXPORT_FORMATS } from '../io/exporters';
 import { PRIMITIVES, PRIMITIVE_ORDER } from '../model/defaults';
-import { useStore, type DisplayMode, type ThemePref } from '../store/store';
+import { useStore, type DisplayMode } from '../store/store';
+import { THEMES, themeDef } from './themes';
+import { useCloud } from '../cloud/cloud';
 import { viewApi, type ViewName } from '../viewport/viewApi';
 import {
   addPrimitive,
@@ -11,6 +13,8 @@ import {
   downloadDocument,
   duplicateSelection,
   exportAs,
+  goHome,
+  shareProject,
   hideSelection,
   importFile,
   newDocument,
@@ -84,6 +88,7 @@ const DISPLAYS: [DisplayMode, string][] = [
   ['shaded', 'Shaded'],
   ['wireframe', 'Wireframe'],
   ['xray', 'X-ray'],
+  ['realistic', 'Realistic (materials and shadows)'],
 ];
 
 function DocName() {
@@ -132,19 +137,31 @@ function SaveState() {
   );
 }
 
-const THEME_ICON: Record<ThemePref, typeof IconMoon> = { dark: IconMoon, light: IconSun, system: IconDeviceDesktop };
-const NEXT_THEME: Record<ThemePref, ThemePref> = { dark: 'light', light: 'system', system: 'dark' };
+
+function AccountButton() {
+  const user = useCloud((c) => c.user);
+  const setModal = useStore((s) => s.setModal);
+  return (
+    <button className="account" title={user ? `Signed in as ${user.email ?? ''}` : 'Sign in to sync projects to the cloud'} onClick={() => setModal('account')}>
+      <IconUser size={14} /> {user ? (user.email ?? 'Account').split('@')[0] : 'Sign in'}
+    </button>
+  );
+}
 
 export function MenuBar() {
   const s = useStore();
-  const ThemeIcon = THEME_ICON[s.prefs.theme];
+  const scheme = themeDef(s.resolvedTheme).scheme;
   return (
     <header className="menubar">
-      <div className="brand" title="OnlineCAD">
+      <button className="brand" title="All projects" aria-label="All projects" onClick={() => void goHome()}>
         <img src="/favicon.svg" alt="" width={20} height={20} />
-      </div>
+      </button>
       <Menubar.Root className="menubar-root">
         <Menu label="File">
+          <Item onSelect={() => void goHome()}>All projects</Item>
+          <Item onSelect={() => s.setModal('drawing')}>Create 2D drawing…</Item>
+          <Item onSelect={() => void shareProject()}>Share link…</Item>
+          <Item onSelect={() => viewApi.saveImage()}>Save image (PNG)</Item>
           <Item onSelect={() => void newDocument()}>New document</Item>
           <Item shortcut={`${mod}O`} onSelect={() => s.setModal('documents')}>
             Open…
@@ -203,6 +220,14 @@ export function MenuBar() {
           <Item shortcut="Shift+H" onSelect={showAllParts}>
             Show all
           </Item>
+          <Sep />
+          <Sub label="Interaction style">
+            <Item onSelect={() => s.setPref('interaction', 'tinkercad')}>{s.prefs.interaction === 'tinkercad' ? '✓ ' : ''}Tinkercad</Item>
+            <Item onSelect={() => s.setPref('interaction', 'pro')}>{s.prefs.interaction === 'pro' ? '✓ ' : ''}Pro (Onshape / Fusion)</Item>
+          </Sub>
+          <Item shortcut={`${mod},`} onSelect={() => s.setModal('settings')}>
+            Preferences…
+          </Item>
         </Menu>
         <Menu label="View">
           <Item shortcut="F" onSelect={() => viewApi.fitAll()}>
@@ -231,8 +256,13 @@ export function MenuBar() {
             {s.prefs.grid ? 'Hide grid' : 'Show grid'}
           </Item>
           <Sub label="Theme">
-            <Item onSelect={() => s.setPref('theme', 'dark')}>{s.prefs.theme === 'dark' ? '✓ ' : ''}Dark</Item>
-            <Item onSelect={() => s.setPref('theme', 'light')}>{s.prefs.theme === 'light' ? '✓ ' : ''}Light</Item>
+            {THEMES.map((t) => (
+              <Item key={t.id} onSelect={() => s.setPref('theme', t.id)}>
+                {s.prefs.theme === t.id ? '✓ ' : ''}
+                {t.label}
+              </Item>
+            ))}
+            <Sep />
             <Item onSelect={() => s.setPref('theme', 'system')}>{s.prefs.theme === 'system' ? '✓ ' : ''}Match system</Item>
           </Sub>
         </Menu>
@@ -276,12 +306,13 @@ export function MenuBar() {
         <SaveState />
       </div>
       <div className="menubar-right">
-        <button className="icon-btn" title={`Theme: ${s.prefs.theme} (click to change)`} onClick={() => s.setPref('theme', NEXT_THEME[s.prefs.theme])}>
-          <ThemeIcon size={16} />
+        <button className="icon-btn" title={scheme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'} onClick={() => s.setPref('theme', scheme === 'dark' ? 'light' : 'dark')}>
+          {scheme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}
         </button>
-        <button className="account" title="You're working locally. Sign-in and cloud sync arrive in milestone 4." onClick={() => s.toast('Sign-in with Google, GitHub, or email arrives with cloud sync in milestone 4. Your work is saved in this browser for now.')}>
-          <IconUser size={14} /> Guest
+        <button className="icon-btn" title={`Preferences (${mod},)`} aria-label="Preferences" onClick={() => s.setModal('settings')}>
+          <IconSettings size={16} />
         </button>
+        <AccountButton />
       </div>
     </header>
   );

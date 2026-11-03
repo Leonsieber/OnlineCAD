@@ -1,11 +1,15 @@
 // Rebuilds the feature history into parts. Runs in the geometry worker.
 // Each feature's output state is cached by a chain hash, so editing feature N only rebuilds N and later.
-import { exportSTEP, importSTEP, type AnyShape } from 'replicad';
+import { drawProjection, exportSTEP, importSTEP, makeCompound, ProjectionCamera, type AnyShape, type ProjectionPlane } from 'replicad';
 import { PRIMITIVES } from '../model/defaults';
 import { evalNum, evalVariables } from '../model/expr';
 import { hashString } from '../model/hash';
 import { base64ToBytes, unpackMeshes } from '../model/meshPack';
-import type { AxisName, Feature, NumExpr, Vec3, Vec3Expr } from '../model/types';
+import type { AxisName, Feature, NumExpr, SketchFeature, SolidOp, Vec3, Vec3Expr } from '../model/types';
+import { solveSketch } from '../sketch/solver';
+import { extrudeSolid, loftSolid, revolveSolid, solveForBuild, sweepSolid } from './sketchSolids';
+import { sculpt, smooth, subdivide } from './meshOps';
+import { runScript } from './scriptApi';
 import {
   IncompleteError,
   UserError,
@@ -26,7 +30,7 @@ import {
   transformShape,
   unwrapSolid,
 } from './geometry';
-import type { EvalRequest, EvalResult, ExportMesh, FeatureStatus, MeasureResult, MeshData, PartResult } from './protocol';
+import { partRef, type DrawingView, type EvalRequest, type EvalResult, type ExportMesh, type FeatureStatus, type MeasureResult, type MeshData, type PartResult } from './protocol';
 
 interface MeshGeom {
   positions: Float32Array;
@@ -59,6 +63,8 @@ interface Ctx {
   scope: Record<string, number>;
   owned: AnyShape[];
   warnings: string[];
+  /** The whole feature list, so features can read the sketches before them. */
+  features: Feature[];
 }
 
 let entries: Entry[] = [];
@@ -117,7 +123,7 @@ export async function evaluate(req: EvalRequest): Promise<EvalResult> {
       for (let j = i; j < entries.length; j++) freeEntry(entries[j]);
       reusing = false;
     }
-    const ctx: Ctx = { scope, owned: [], warnings: [] };
+    const ctx: Ctx = { scope, owned: [], warnings: [], features: req.features };
     let status: FeatureStatus;
     let result = state;
     if (f.suppressed) {
@@ -214,6 +220,12 @@ function meshPart(m: MeshGeom, key: string): MeshData {
   };
 }
 
+function looseWarning(loose: number, total: number, what: 'edge' | 'face', feature: string): string {
+  const which = total === 1 ? `The picked ${what}` : loose === total ? `All ${total} picked ${what}s` : `${loose} of the ${total} picked ${what}s`;
+  const wrong = loose === 1 ? `the wrong ${what}` : `the wrong ${what}s`;
+  return `${which} changed a lot since ${loose === 1 ? 'it was' : 'they were'} picked, so the ${feature} may be on ${wrong}. Edit it to pick again.`;
+}
+
 const AXES: Record<AxisName, Vec3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
 
 async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> {
@@ -236,7 +248,7 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
   };
   const solid = (id: string, role = 'Part') => {
     const p = part(id, role);
-    if (p.kind !== 'brep' || !p.shape) throw new UserError(`"${p.label}" is a mesh. This operation needs a solid part.`);
+    if (p.kind !== 'brep' || !p.shape) throw new UserError(`"${partRef(p.id, p.label)}" is a mesh. This operation needs a solid part.`);
     return p as PartState & { shape: AnyShape };
   };
   const next = new Map(state);
@@ -268,7 +280,7 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
           let acc: AnyShape = target.shape;
           for (const tool of tools) {
             if (tool.id === target.id) throw new UserError('A part cannot subtract itself');
-            const misses = `"${tool.label}" doesn't overlap "${target.label}", so it cuts nothing. Move it into the part.`;
+            const misses = `"${partRef(tool.id, tool.label)}" doesn't overlap "${partRef(target.id, target.label)}", so it cuts nothing. Move it into the part.`;
             // Cheap check first; then compare volumes, since bounding boxes can overlap while solids don't.
             const disjoint = !boxesOverlap(boundsOf(acc), boundsOf(tool.shape));
             const before = disjoint ? 0 : volumeOf(acc);
@@ -277,7 +289,7 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
             if (acc !== target.shape) safeDelete(acc);
             acc = r;
           }
-          if (isEmpty(acc)) throw new UserError(`Nothing is left of "${target.label}"`);
+          if (isEmpty(acc)) throw new UserError(`Nothing is left of "${partRef(target.id, target.label)}"`);
           update(target, unwrapSolid(acc));
         }
         if (!f.keepTools) for (const t of tools) if (!f.targets.includes(t.id)) next.delete(t.id);
@@ -309,7 +321,8 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
       for (const r of refs) byPart.set(r.part, [...(byPart.get(r.part) ?? []), r]);
       for (const [pid, prefs] of byPart) {
         const p = solid(pid);
-        const hashes = resolveEdges(p.shape, prefs);
+        const { hashes, loose } = resolveEdges(p.shape, prefs);
+        if (loose) ctx.warnings.push(looseWarning(loose, prefs.length, 'edge', f.type));
         const s = p.shape as never as {
           fillet(c: (e: { hashCode: number }) => number | null): AnyShape;
           chamfer(c: (e: { hashCode: number }) => number | null): AnyShape;
@@ -327,7 +340,8 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
       const p = solid(pid);
       const t = num(f.thickness, 'Thickness');
       if (!(t > 0)) throw new UserError('Thickness must be greater than 0');
-      const hashes = resolveFaces(p.shape, f.faces);
+      const { hashes, loose } = resolveFaces(p.shape, f.faces);
+      if (loose) ctx.warnings.push(looseWarning(loose, f.faces.length, 'face', 'shell'));
       const s = p.shape as never as {
         shell(t: number, finder: (ff: { when(fn: (a: { element: { hashCode: number } }) => boolean): unknown }) => unknown): AnyShape;
       };
@@ -346,7 +360,7 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
       const even = Math.abs(st[0] - st[1]) < 1e-9 && Math.abs(st[0] - st[2]) < 1e-9;
       for (const id of f.parts) {
         const p = part(id);
-        if (p.shape && !even) throw new UserError(`"${p.label}" is a solid that can only scale evenly here. Stretch the shapes it was made from instead.`);
+        if (p.shape && !even) throw new UserError(`"${partRef(p.id, p.label)}" is a solid that can only scale evenly here. Stretch the shapes it was made from instead.`);
         const moved = movePart(p, t, r, f.pivot, p.shape ? sc * st[0] : sc, own, st);
         if (f.copy) {
           const cid = `${f.id}:${id}`;
@@ -478,6 +492,119 @@ async function applyFeature(f: Feature, state: State, ctx: Ctx): Promise<State> 
       }
       return next;
     }
+
+    case 'sketch': {
+      // Sketches add no parts; solving here reports conflicts and bad dimensions in the history.
+      const r = solveSketch(f, ctx.scope);
+      if (r.errors.length) throw new UserError(r.errors[0]);
+      if (!r.ok) ctx.warnings.push(`${r.failed.length} constraint${r.failed.length === 1 ? '' : 's'} can't be satisfied together. Edit the sketch to fix it.`);
+      return next;
+    }
+
+    case 'meshEdit': {
+      if (!f.parts.length) throw new IncompleteError('Select the parts to change');
+      const amount = Math.round(num(f.amount, f.op === 'smooth' ? 'Passes' : 'Levels'));
+      if (f.op !== 'toMesh' && !(amount >= 1)) throw new UserError('Use 1 or more');
+      if (f.op === 'subdivide' && amount > 4) throw new UserError('Up to 4 levels (each one makes four times as many triangles)');
+      for (const id of f.parts) {
+        const p = part(id);
+        let m = asMesh(p);
+        if (f.op === 'subdivide') m = subdivide(m, amount);
+        if (f.op === 'smooth') m = smooth(m, amount);
+        if (m.indices.length / 3 > 3_000_000) throw new UserError('That makes more than 3 million triangles. Use fewer levels.');
+        next.set(id, { ...p, kind: 'mesh', shape: undefined, mesh: m, key: newKey(), last: f.id });
+      }
+      return next;
+    }
+
+    case 'sculpt': {
+      const p = part(f.part);
+      const m = sculpt(asMesh(p), f.strokes);
+      next.set(p.id, { ...p, kind: 'mesh', shape: undefined, mesh: m, key: newKey(), last: f.id });
+      return next;
+    }
+
+    case 'script': {
+      const values: Record<string, number> = { ...ctx.scope };
+      for (const prm of f.params) {
+        if (!/^[A-Za-z_]\w*$/.test(prm.name)) throw new UserError(`"${prm.name}" is not a valid parameter name`);
+        values[prm.name] = num(prm.value, prm.name);
+      }
+      const made = runScript(f.code, values);
+      const pos = vec(f.placement.position, 'Position');
+      const rot = vec(f.placement.rotation, 'Rotation');
+      made.forEach((m, k) => {
+        const id = made.length === 1 ? f.id : `${f.id}:${k}`;
+        const shape = transformShape(unwrapSolid(m.shape), pos, rot, [0, 0, 0]);
+        next.set(id, { id, kind: 'brep', shape: own(shape), key: newKey(), source: f.id, last: f.id, label: m.name ? `${f.name} ${m.name}` : made.length === 1 ? f.name : `${f.name} ${k + 1}` });
+      });
+      return next;
+    }
+
+    case 'extrude':
+      return solidOp(f.op, f.targets, extrudeSolid(f, sketchOf(f.sketch), num));
+    case 'revolve':
+      return solidOp(f.op, f.targets, revolveSolid(f, sketchOf(f.sketch), num));
+    case 'sweep':
+      if (!f.path) throw new IncompleteError('Pick the sketch with the path to sweep along');
+      return solidOp(f.op, f.targets, sweepSolid(sketchOf(f.sketch, 'Profile sketch'), sketchOf(f.path, 'Path sketch')));
+    case 'loft':
+      return solidOp(f.op, f.targets, loftSolid(f, f.sketches.map((id) => sketchOf(id))));
+  }
+
+  /** A part's triangles: solids are tessellated finely, meshes are used as they are. */
+  function asMesh(p: PartState): MeshGeom {
+    if (p.mesh) return p.mesh;
+    return meshTriangles(p.shape!);
+  }
+
+  /** A sketch from earlier in the history, solved with the current variables. */
+  function sketchOf(id: string, role = 'Sketch') {
+    if (!id) throw new IncompleteError(`Pick the ${role.toLowerCase()}`);
+    const at = ctx.features.findIndex((x) => x.id === f.id);
+    const i = ctx.features.findIndex((x) => x.id === id);
+    const sk = ctx.features[i] as SketchFeature | undefined;
+    if (!sk || sk.type !== 'sketch' || i > at) throw new UserError(`${role} is missing. It must come before this feature in the history.`);
+    if (sk.suppressed) throw new UserError(`"${sk.name}" is suppressed`);
+    return solveForBuild(sk, ctx.scope);
+  }
+
+  /** Adds the new solid as a part, or merges it into, cuts it from, or intersects it with other parts. */
+  function solidOp(op: SolidOp, targets: string[], made: AnyShape): State {
+    made = own(unwrapSolid(made));
+    if (isEmpty(made)) throw new UserError('The result is empty. Check the sketch and the distances.');
+    const asNew = () => next.set(f.id, { id: f.id, kind: 'brep', shape: made, key: newKey(), source: f.id, last: f.id, label: f.name });
+    if (op === 'new') {
+      asNew();
+      return next;
+    }
+    const bb = boundsOf(made);
+    const ids = targets.length ? targets : [...state.values()].filter((p) => p.kind === 'brep' && p.shape && boxesOverlap(boundsOf(p.shape), bb)).map((p) => p.id);
+    if (!ids.length) {
+      if (op === 'add') asNew();
+      else ctx.warnings.push(`It doesn't touch any part, so it ${op === 'cut' ? 'cuts' : 'keeps'} nothing. Move it into a part or pick the parts to ${op}.`);
+      return next;
+    }
+    if (op === 'add') {
+      const first = solid(ids[0], 'Target part');
+      let acc: AnyShape = made;
+      for (const id of ids) {
+        const r = (acc as never as { fuse(o: AnyShape): AnyShape }).fuse(solid(id, 'Target part').shape);
+        if (acc !== made) safeDelete(acc);
+        acc = r;
+      }
+      update(first, unwrapSolid(acc));
+      for (const id of ids.slice(1)) next.delete(id);
+      return next;
+    }
+    for (const id of ids) {
+      const p = solid(id, 'Target part');
+      const s = p.shape as never as { cut(o: AnyShape): AnyShape; intersect(o: AnyShape): AnyShape };
+      const r = op === 'cut' ? s.cut(made) : s.intersect(made);
+      if (isEmpty(r)) throw new UserError(`Nothing is left of "${partRef(p.id, p.label)}"`);
+      update(p, unwrapSolid(r));
+    }
+    return next;
   }
 }
 
@@ -507,6 +634,29 @@ export function measure(id: string): MeasureResult {
   const p = getPart(id);
   if (p.shape) return measureShape(p.shape);
   return { volume: 0, area: 0, centerOfMass: [0, 0, 0], bbox: meshBounds(p.mesh!.positions), solid: false };
+}
+
+/**
+ * Hidden-line views for a 2D drawing: front, top, right, and an isometric view of the given parts.
+ * Paths are SVG path data in model millimetres; `box` is [minX, minY, maxX, maxY] of the visible lines.
+ */
+export function drawingViews(ids: string[]): DrawingView[] {
+  const shapes = ids.map((id) => getPart(id)).filter((p) => p.shape).map((p) => p.shape!);
+  if (!shapes.length) throw new Error('Drawings need solid parts (meshes have no exact edges)');
+  const all = shapes.length === 1 ? shapes[0] : makeCompound(shapes);
+  const views: [DrawingView['name'], ProjectionPlane | ProjectionCamera][] = [
+    ['front', 'front'],
+    ['top', 'top'],
+    ['right', 'right'],
+    ['iso', new ProjectionCamera([1, -1, 1], [-1, 1, -1])],
+  ];
+  const out: DrawingView[] = [];
+  for (const [name, cam] of views) {
+    const { visible, hidden } = drawProjection(all, cam);
+    const b = visible.boundingBox.bounds;
+    out.push({ name, visible: visible.toSVGPaths().flat(), hidden: hidden.toSVGPaths().flat(), box: [b[0][0], b[0][1], b[1][0], b[1][1]] });
+  }
+  return out;
 }
 
 export function exportMeshes(ids: string[]): ExportMesh[] {

@@ -20,7 +20,20 @@ import type {
   ShellFeature,
   TransformFeature,
   Vec3,
+  SketchFeature,
+  SketchFrame,
+  SketchPlaneName,
+  ExtrudeFeature,
+  RevolveFeature,
+  SweepFeature,
+  LoftFeature,
+  SolidOp,
+  MeshEditFeature,
+  MeshOp,
+  SculptFeature,
+  ScriptFeature,
 } from './types';
+import { LIBRARY, SCRIPT_TEMPLATE } from './library';
 
 export interface ParamDef {
   key: string;
@@ -75,6 +88,14 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   circularPattern: 'Circular pattern',
   import: 'Import',
   deleteParts: 'Delete parts',
+  sketch: 'Sketch',
+  extrude: 'Extrude',
+  revolve: 'Revolve',
+  sweep: 'Sweep',
+  loft: 'Loft',
+  meshEdit: 'Mesh edit',
+  sculpt: 'Sculpt',
+  script: 'Script',
 };
 
 export const BOOLEAN_LABELS: Record<BooleanOp, string> = { union: 'Union', subtract: 'Subtract', intersect: 'Intersect' };
@@ -83,6 +104,7 @@ export const PART_COLORS = ['#6f9cff', '#f2994a', '#5fc28d', '#e05d73', '#b38cf2
 
 export function featureLabel(f: Feature): string {
   if (f.type === 'primitive') return PRIMITIVES[f.kind].label;
+  if (f.type === 'meshEdit') return MESH_OP_LABELS[f.op];
   if (f.type === 'boolean') return BOOLEAN_LABELS[f.op];
   return FEATURE_LABELS[f.type];
 }
@@ -193,6 +215,87 @@ export function createDeleteParts(parts: string[], features: Feature[]): DeleteP
   return { id: newId(), type: 'deleteParts', name: nextName('Delete parts', features), parts };
 }
 
+/** The standard sketch planes. Sketch y is normal × x, so Front and Right have Z pointing up. */
+export const SKETCH_PLANES: Record<Exclude<SketchPlaneName, 'face'>, { label: string; frame: SketchFrame }> = {
+  XY: { label: 'Top (XY)', frame: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] } },
+  XZ: { label: 'Front (XZ)', frame: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, -1, 0] } },
+  YZ: { label: 'Right (YZ)', frame: { origin: [0, 0, 0], xDir: [0, 1, 0], normal: [1, 0, 0] } },
+};
+
+/** The fixed origin point every sketch starts with, so shapes can be pinned to it. */
+export const SKETCH_ORIGIN = 'o';
+
+export function createSketch(plane: SketchPlaneName, features: Feature[], frame?: SketchFrame): SketchFeature {
+  return {
+    id: newId(),
+    type: 'sketch',
+    name: nextName('Sketch', features),
+    plane,
+    offset: 0,
+    frame: frame ?? SKETCH_PLANES[plane === 'face' ? 'XY' : plane].frame,
+    points: [{ id: SKETCH_ORIGIN, x: 0, y: 0 }],
+    entities: [],
+    constraints: [{ id: 'fix-origin', type: 'fix', refs: [SKETCH_ORIGIN] }],
+  };
+}
+
+/** The most recent sketch, which new extrudes and revolves pick by default. */
+export function lastSketch(features: Feature[]): string {
+  for (let i = features.length - 1; i >= 0; i--) if (features[i].type === 'sketch') return features[i].id;
+  return '';
+}
+
+export function createExtrude(features: Feature[], op: SolidOp = 'new'): ExtrudeFeature {
+  return { id: newId(), type: 'extrude', name: nextName('Extrude', features), sketch: lastSketch(features), distance: 10, extent: 'one', distance2: 5, flip: op === 'cut', op, targets: [] };
+}
+
+export function createRevolve(features: Feature[]): RevolveFeature {
+  return { id: newId(), type: 'revolve', name: nextName('Revolve', features), sketch: lastSketch(features), axis: 'Y', angle: 360, op: 'new', targets: [] };
+}
+
+export function createSweep(features: Feature[]): SweepFeature {
+  const sketches = features.filter((f) => f.type === 'sketch');
+  return {
+    id: newId(),
+    type: 'sweep',
+    name: nextName('Sweep', features),
+    sketch: sketches.at(-1)?.id ?? '',
+    path: sketches.at(-2)?.id ?? '',
+    op: 'new',
+    targets: [],
+  };
+}
+
+export function createLoft(features: Feature[]): LoftFeature {
+  return { id: newId(), type: 'loft', name: nextName('Loft', features), sketches: features.filter((f) => f.type === 'sketch').slice(-2).map((f) => f.id), ruled: false, op: 'new', targets: [] };
+}
+
+export const MESH_OP_LABELS: Record<MeshOp, string> = { toMesh: 'Convert to mesh', subdivide: 'Subdivide', smooth: 'Smooth' };
+
+export function createMeshEdit(op: MeshOp, parts: string[], features: Feature[]): MeshEditFeature {
+  return { id: newId(), type: 'meshEdit', name: nextName(MESH_OP_LABELS[op], features), parts, op, amount: op === 'smooth' ? 5 : 1 };
+}
+
+export function createSculpt(part: string, features: Feature[]): SculptFeature {
+  return { id: newId(), type: 'sculpt', name: nextName('Sculpt', features), part, strokes: [] };
+}
+
+export function createScript(features: Feature[], libraryId?: string, position: Vec3 = [0, 0, 0]): ScriptFeature {
+  const item = libraryId ? LIBRARY.find((l) => l.id === libraryId) : undefined;
+  return {
+    id: newId(),
+    type: 'script',
+    name: nextName(item?.label ?? 'Script', features),
+    code: item?.code ?? SCRIPT_TEMPLATE,
+    params: item ? item.params.map((x) => ({ ...x })) : [{ name: 'size', value: 30 }],
+    ...(item && { library: item.id }),
+    placement: { position: [...position], rotation: [0, 0, 0] },
+  };
+}
+
+/** Features with their own placement (shapes and scripts), which moves edit directly. */
+export const isPlaced = (f: Feature | undefined): f is PrimitiveFeature | ScriptFeature => f?.type === 'primitive' || f?.type === 'script';
+
 /** Part ids a feature reads, so we can tell whether a part is still "free" to edit in place. */
 export function referencedParts(f: Feature): string[] {
   switch (f.type) {
@@ -208,7 +311,15 @@ export function referencedParts(f: Feature): string[] {
     case 'linearPattern':
     case 'circularPattern':
     case 'deleteParts':
+    case 'meshEdit':
       return f.parts;
+    case 'sculpt':
+      return [f.part];
+    case 'extrude':
+    case 'revolve':
+    case 'sweep':
+    case 'loft':
+      return f.targets;
     default:
       return [];
   }

@@ -1,9 +1,12 @@
 // Tinkercad-style handles for the selected part(s): footprint corners and sides resize, the top
-// square sets the height, the cone lifts, the arc rotates, and the size labels take exact values.
-import { useEffect, useMemo, useState } from 'react';
+// square sets the height, the cone lifts, three arcs rotate (with a protractor), and the size labels
+// take exact values. In the Pro interaction style, dragging the body of a part doesn't move it.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Html, Line } from '@react-three/drei';
-import { Matrix4, Plane, Quaternion, Vector3, type Ray } from 'three';
+import { useThree } from '@react-three/fiber';
+import { Matrix4, Plane, Quaternion, Vector3, type Group, type Ray } from 'three';
 import { insertFeature, replaceFeature } from '../model/docOps';
+import { isPlaced } from '../model/defaults';
 import { evalNum, formatNum } from '../model/expr';
 import type { Vec3 } from '../model/types';
 import { resizeFrame, type ResizeFrame } from '../store/resize';
@@ -33,7 +36,7 @@ function useSelectionIds() {
   const draft = useStore((s) => s.draft);
   const parts = useStore((s) => s.parts);
   return useMemo(() => {
-    const raw = draft ? (draft.feature.type === 'primitive' ? [draft.feature.id] : []) : sel.filter((x) => x.kind === 'part').map((x) => x.part);
+    const raw = draft ? (isPlaced(draft.feature) ? [draft.feature.id] : []) : sel.filter((x) => x.kind === 'part').map((x) => x.part);
     return raw.filter((id) => parts.some((p) => p.id === id));
   }, [draft, sel, parts]);
 }
@@ -46,7 +49,7 @@ function useFrame3(ids: string[]): ResizeFrame | null {
   return useMemo(() => {
     if (!ids.length) return null;
     const d =
-      draft?.feature.type === 'primitive' ? (draft.isNew ? insertFeature(doc, draft.feature, draft.index) : replaceFeature(doc, draft.feature)) : doc;
+      isPlaced(draft?.feature) ? (draft!.isNew ? insertFeature(doc, draft!.feature, draft!.index) : replaceFeature(doc, draft!.feature)) : doc;
     return resizeFrame(ids, d, parts, scope);
   }, [ids, draft, doc, parts, scope]);
 }
@@ -58,12 +61,38 @@ export function ResizeHandles() {
   const colors = useSceneColors();
   const [live, setLive] = useState<Box | null>(null);
   const [busy, setBusy] = useState<'move' | 'rotate' | null>(null);
-  const [angle, setAngle] = useState(0);
+  const [rot, setRot] = useState<Protractor | null>(null);
+  const [shift, setShift] = useState<Vec3 | null>(null);
+  const style = useStore((s) => s.prefs.interaction);
+  const invalidate = useThree((s) => s.invalidate);
+
+  // During move, lift, and rotate drags the handles ride along with the part's live preview
+  // (resizes redraw the box instead). It stays applied until the rebuilt geometry arrives.
+  const follow = useRef<Group | null>(null);
+  const following = useRef(false);
+  useEffect(() => {
+    const apply = () => {
+      const g = follow.current;
+      if (!g) return;
+      if (following.current && liveMove.parts.length) g.matrix.copy(liveMove.matrix);
+      else {
+        following.current = false;
+        g.matrix.identity();
+      }
+      g.matrixWorldNeedsUpdate = true;
+      invalidate();
+    };
+    return liveMove.subscribe(apply);
+  }, [invalidate]);
+  const startFollowing = (kind: 'move' | 'rotate') => {
+    following.current = true;
+    setBusy(kind);
+  };
 
   const idKey = ids.join('|');
-  // Dragging a selected part moves it on its ground plane (works in every gizmo mode).
+  // Tinkercad style: dragging a selected part moves it on its ground plane (in every gizmo mode).
   useEffect(() => {
-    if (!ids.length || !frame) {
+    if (!ids.length || !frame || style !== 'tinkercad') {
       bodyDrag.start = null;
       return;
     }
@@ -71,21 +100,25 @@ export function ResizeHandles() {
     bodyDrag.start = (_ray, _e, point) => {
       const plane = new Plane(new Vector3(0, 0, 1), -point.z);
       let delta = new Matrix4();
-      setBusy('move');
+      startFollowing('move');
       return {
         move(r) {
           const p = r.intersectPlane(plane, new Vector3());
           if (!p) return;
           p.sub(point);
-          delta = new Matrix4().makeTranslation(snapDelta(p.x), snapDelta(p.y), 0);
+          const d: Vec3 = [snapDelta(p.x), snapDelta(p.y), 0];
+          delta = new Matrix4().makeTranslation(...d);
+          setShift(d);
           liveMove.set(ids, delta);
         },
         end() {
           setBusy(null);
+          setShift(null);
           useStore.getState().commitMove(ids, delta, center.toArray());
         },
         cancel() {
           setBusy(null);
+          setShift(null);
           liveMove.clear();
         },
       };
@@ -94,7 +127,7 @@ export function ResizeHandles() {
       bodyDrag.start = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idKey, frame]);
+  }, [idKey, frame, style]);
 
   if (!frame || mode !== 'handles') return null;
   const { quat, origin } = frame;
@@ -152,10 +185,21 @@ export function ResizeHandles() {
             const hit = r.intersectPlane(plane, new Vector3());
             if (!hit) return;
             const q = toLocal(hit);
-            if (sides[0] > 0) nmax.x = min0.x + snapLen(q.x - min0.x);
-            if (sides[0] < 0) nmin.x = max0.x - snapLen(max0.x - q.x);
-            if (sides[1] > 0) nmax.y = min0.y + snapLen(q.y - min0.y);
-            if (sides[1] < 0) nmin.y = max0.y - snapLen(max0.y - q.y);
+            if (ev.altKey) {
+              // Alt resizes from the center, so both opposite sides move.
+              for (const [i, k] of [[0, 'x'], [1, 'y']] as const) {
+                if (!sides[i]) continue;
+                const mid = (min0[k] + max0[k]) / 2;
+                const half = snapLen(2 * Math.abs(q[k] - mid)) / 2;
+                nmin[k] = mid - half;
+                nmax[k] = mid + half;
+              }
+            } else {
+              if (sides[0] > 0) nmax.x = min0.x + snapLen(q.x - min0.x);
+              if (sides[0] < 0) nmin.x = max0.x - snapLen(max0.x - q.x);
+              if (sides[1] > 0) nmax.y = min0.y + snapLen(q.y - min0.y);
+              if (sides[1] < 0) nmin.y = max0.y - snapLen(max0.y - q.y);
+            }
           }
           const ratio = (k: 'x' | 'y' | 'z') => (size0[k] > 1e-9 ? (nmax[k] - nmin[k]) / size0[k] : 1);
           let s: Vec3 = [ratio('x'), ratio('y'), ratio('z')];
@@ -163,9 +207,10 @@ export function ResizeHandles() {
           const k = dragged.reduce((acc, i) => (Math.abs(s[i] - 1) > Math.abs(acc - 1) ? s[i] : acc), 1);
           const uniform = ev.shiftKey || !frame.canStretch;
           if (uniform) s = [k, k, k];
+          const fromCenter = ev.altKey && !top;
           anchor = new Vector3(
-            sides[0] > 0 ? min0.x : sides[0] < 0 ? max0.x : (min0.x + max0.x) / 2,
-            sides[1] > 0 ? min0.y : sides[1] < 0 ? max0.y : (min0.y + max0.y) / 2,
+            sides[0] > 0 && !fromCenter ? min0.x : sides[0] < 0 && !fromCenter ? max0.x : (min0.x + max0.x) / 2,
+            sides[1] > 0 && !fromCenter ? min0.y : sides[1] < 0 && !fromCenter ? max0.y : (min0.y + max0.y) / 2,
             min0.z,
           );
           S = s;
@@ -187,60 +232,74 @@ export function ResizeHandles() {
     const t0 = closestOnAxis(base, zAxis, ray);
     if (t0 === null) return null;
     let delta = new Matrix4();
-    setBusy('move');
+    startFollowing('move');
     return {
       move(r) {
         const t = closestOnAxis(base, zAxis, r);
         if (t === null) return;
         const d = zAxis.clone().multiplyScalar(snapDelta(t - t0));
         delta = new Matrix4().makeTranslation(d.x, d.y, d.z);
+        setShift(d.toArray());
         liveMove.set(ids, delta);
       },
       end() {
         setBusy(null);
+        setShift(null);
         useStore.getState().commitMove(ids, delta, toWorld(c).toArray());
       },
       cancel() {
         setBusy(null);
+        setShift(null);
         liveMove.clear();
       },
     };
   };
 
-  const rotateStart = (ray: Ray): DragSession | null => {
-    const center = toWorld(new Vector3(c.x, c.y, frame.min.z));
-    const plane = new Plane().setFromNormalAndCoplanarPoint(zAxis, center);
-    const p0 = ray.intersectPlane(plane, new Vector3());
-    if (!p0) return null;
-    const v0 = p0.sub(center);
-    let delta = new Matrix4();
-    setBusy('rotate');
-    setAngle(0);
-    return {
-      move(r, ev) {
-        const p = r.intersectPlane(plane, new Vector3());
-        if (!p) return;
-        const v = p.sub(center);
-        let a = Math.atan2(zAxis.dot(v0.clone().cross(v)), v0.dot(v));
-        const step = ((ev.shiftKey ? 1 : 15) * Math.PI) / 180;
-        a = Math.round(a / step) * step;
-        setAngle((a * 180) / Math.PI);
-        delta = new Matrix4()
-          .makeTranslation(center.x, center.y, center.z)
-          .multiply(new Matrix4().makeRotationFromQuaternion(new Quaternion().setFromAxisAngle(zAxis, a)))
-          .multiply(new Matrix4().makeTranslation(-center.x, -center.y, -center.z));
-        liveMove.set(ids, delta);
-      },
-      end() {
-        setBusy(null);
-        useStore.getState().commitMove(ids, delta, center.toArray());
-      },
-      cancel() {
-        setBusy(null);
-        liveMove.clear();
-      },
+  const rotateStart =
+    (axis: 0 | 1 | 2) =>
+    (ray: Ray): DragSession | null => {
+      const arc = arcFor(axis);
+      const normal = arc.u.clone().cross(arc.v).applyQuaternion(quat).normalize();
+      const center = toWorld(arc.center);
+      const plane = new Plane().setFromNormalAndCoplanarPoint(normal, center);
+      const p0 = ray.intersectPlane(plane, new Vector3());
+      if (!p0) return null;
+      const v0 = p0.sub(center);
+      const radius = arc.r * 1.15;
+      let delta = new Matrix4();
+      following.current = false;
+      setBusy('rotate');
+      const show = (a: number, fine: boolean) => setRot({ center, normal, start: v0.clone().normalize(), radius, angle: a, fine, axis });
+      show(0, false);
+      return {
+        move(r, ev) {
+          const p = r.intersectPlane(plane, new Vector3());
+          if (!p) return;
+          const v = p.sub(center);
+          let a = Math.atan2(normal.dot(v0.clone().cross(v)), v0.dot(v));
+          // Like Tinkercad: on or outside the protractor ring it snaps to 22.5 degrees, inside to 1 (Shift: 1 anywhere).
+          const fine = ev.shiftKey || v.length() < radius * 0.8;
+          const step = ((fine ? 1 : 22.5) * Math.PI) / 180;
+          a = Math.round(a / step) * step;
+          show(a, fine);
+          delta = new Matrix4()
+            .makeTranslation(center.x, center.y, center.z)
+            .multiply(new Matrix4().makeRotationFromQuaternion(new Quaternion().setFromAxisAngle(normal, a)))
+            .multiply(new Matrix4().makeTranslation(-center.x, -center.y, -center.z));
+          liveMove.set(ids, delta);
+        },
+        end() {
+          setBusy(null);
+          setRot(null);
+          useStore.getState().commitMove(ids, delta, center.toArray());
+        },
+        cancel() {
+          setBusy(null);
+          setRot(null);
+          liveMove.clear();
+        },
+      };
     };
-  };
 
   const commitSize = (axis: 0 | 1 | 2, text: string) => {
     let v: number;
@@ -272,12 +331,24 @@ export function ResizeHandles() {
     [0, 1, c.x, max.y],
     [0, -1, c.x, min.y],
   ];
-  const arcR = Math.hypot(max.x - min.x, max.y - min.y) / 2 + off;
-  const arc: [number, number, number][] = [];
-  for (let i = 0; i <= 24; i++) {
-    const a = -Math.PI / 2 - 0.45 + (0.9 * i) / 24;
-    arc.push([c.x + arcR * Math.cos(a), c.y + arcR * Math.sin(a), z]);
+  /** Where each rotate arc sits: its center, the plane it lies in (u, v), its radius, and which way it faces. */
+  function arcFor(axis: 0 | 1 | 2) {
+    const sx = max.x - min.x;
+    const sy = max.y - min.y;
+    const sz = max.z - min.z;
+    // Z turns on the floor at the front, Y over the top left, X over the top back, so the three never overlap.
+    if (axis === 2) return { center: new Vector3(c.x, c.y, min.z), u: new Vector3(1, 0, 0), v: new Vector3(0, 1, 0), r: Math.hypot(sx, sy) / 2 + off, mid: -Math.PI / 2 };
+    if (axis === 1) return { center: c.clone(), u: new Vector3(0, 0, 1), v: new Vector3(1, 0, 0), r: Math.hypot(sx, sz) / 2 + off, mid: -Math.PI / 4 };
+    return { center: c.clone(), u: new Vector3(0, 1, 0), v: new Vector3(0, 0, 1), r: Math.hypot(sy, sz) / 2 + off, mid: Math.PI / 4 };
   }
+  const arcs = ([2, 1, 0] as const).map((axis) => {
+    const f = arcFor(axis);
+    const at = (t: number) => f.center.clone().addScaledVector(f.u, f.r * Math.cos(t)).addScaledVector(f.v, f.r * Math.sin(t));
+    const points: [number, number, number][] = [];
+    for (let i = 0; i <= 24; i++) points.push(at(f.mid - 0.45 + (0.9 * i) / 24).toArray());
+    return { axis, points, dot: at(f.mid).toArray() as [number, number, number] };
+  });
+  const axisColor = [colors.axisX, colors.axisY, colors.axisZ];
   const accent = colors.accent;
   const footprint: [number, number, number][] = [
     [min.x, min.y, z],
@@ -288,37 +359,106 @@ export function ResizeHandles() {
   ];
   const dash = maxDim * 0.035;
   const size = max.clone().sub(min);
+  const pro = style === 'pro';
 
   return (
-    <group position={origin.toArray()} quaternion={quat.toArray() as [number, number, number, number]}>
-      {busy === 'rotate' && (
-        <Html position={[c.x, c.y, z]} center zIndexRange={[40, 30]}>
-          <div className="dim-chip">{formatNum(angle, 1)}°</div>
-        </Html>
-      )}
-      {!busy && (
-        <>
-          <Line points={footprint} color={accent} lineWidth={1.3} dashed dashSize={dash} gapSize={dash * 0.7} depthTest={false} renderOrder={15} />
-          <Line points={arc} color={accent} lineWidth={2.5} depthTest={false} renderOrder={15} />
-          {/* Dimension lines with editable sizes */}
-          <Line points={[[min.x, min.y - off, z], [max.x, min.y - off, z]]} color={colors.edge} lineWidth={1} depthTest={false} renderOrder={15} />
-          <Line points={[[max.x + off, min.y, z], [max.x + off, max.y, z]]} color={colors.edge} lineWidth={1} depthTest={false} renderOrder={15} />
-          <Line points={[[max.x + off, min.y - off, min.z], [max.x + off, min.y - off, max.z]]} color={colors.edge} lineWidth={1} depthTest={false} renderOrder={15} />
-          <SizeLabel position={[c.x, min.y - off, z]} value={size.x} onCommit={(t) => commitSize(0, t)} title="Width (X)" />
-          <SizeLabel position={[max.x + off, c.y, z]} value={size.y} onCommit={(t) => commitSize(1, t)} title="Depth (Y)" />
-          <SizeLabel position={[max.x + off, min.y - off, c.z]} value={size.z} onCommit={(t) => commitSize(2, t)} title="Height (Z)" />
+    <>
+      {rot && <ProtractorView p={rot} color={axisColor[rot.axis]} text={colors.edge} />}
+      <group ref={follow} matrixAutoUpdate={false}>
+        <group position={origin.toArray()} quaternion={quat.toArray() as [number, number, number, number]}>
+          {shift && (
+            <Html position={[c.x, c.y, max.z + off * 1.9]} center zIndexRange={[40, 30]}>
+              <div className="dim-chip active">
+                {Math.abs(shift[2]) > 1e-9 && !shift[0] && !shift[1]
+                  ? `Z ${shift[2] > 0 ? '+' : ''}${formatNum(shift[2], 2)}`
+                  : `X ${formatNum(shift[0], 2)} · Y ${formatNum(shift[1], 2)}`}
+              </div>
+            </Html>
+          )}
+          {busy !== 'rotate' && (
+            <>
+              <Line points={footprint} color={accent} lineWidth={1.3} dashed dashSize={dash} gapSize={dash * 0.7} depthTest={false} renderOrder={15} />
+              {/* Dimension lines with editable sizes */}
+              <Line points={[[min.x, min.y - off, z], [max.x, min.y - off, z]]} color={colors.edge} lineWidth={1} depthTest={false} renderOrder={15} />
+              <Line points={[[max.x + off, min.y, z], [max.x + off, max.y, z]]} color={colors.edge} lineWidth={1} depthTest={false} renderOrder={15} />
+              <Line points={[[max.x + off, min.y - off, min.z], [max.x + off, min.y - off, max.z]]} color={colors.edge} lineWidth={1} depthTest={false} renderOrder={15} />
+              <SizeLabel position={[c.x, min.y - off, z]} value={size.x} onCommit={(t) => commitSize(0, t)} title="Width (X)" />
+              <SizeLabel position={[max.x + off, c.y, z]} value={size.y} onCommit={(t) => commitSize(1, t)} title="Depth (Y)" />
+              <SizeLabel position={[max.x + off, min.y - off, c.z]} value={size.z} onCommit={(t) => commitSize(2, t)} title="Height (Z)" />
 
-          {corners.map(([sx, sy, x, y]) => (
-            <Handle key={`c${sx}${sy}`} id={`rs-c${sx}${sy}`} shape="square" position={[x, y, z]} hoverColor={accent} cursor="nwse-resize" onStart={resizeStart([sx, sy], false)} />
-          ))}
-          {mids.map(([sx, sy, x, y]) => (
-            <Handle key={`m${sx}${sy}`} id={`rs-m${sx}${sy}`} shape="dot" px={8} position={[x, y, z]} hoverColor={accent} cursor={sx ? 'ew-resize' : 'ns-resize'} onStart={resizeStart([sx, sy], false)} />
-          ))}
-          <Handle id="rs-top" shape="square" position={[c.x, c.y, max.z]} hoverColor={accent} cursor="ns-resize" onStart={resizeStart([0, 0], true)} />
-          <Handle id="rs-lift" shape="cone" px={16} position={[c.x, c.y, max.z + off]} hoverColor={accent} cursor="ns-resize" onStart={liftStart} />
-          <Handle id="rs-rot" shape="sphere" px={13} color={accent} position={[c.x, c.y - arcR, z]} hoverColor={colors.hover} cursor="grab" onStart={rotateStart} />
-        </>
-      )}
+              {corners.map(([sx, sy, x, y]) => (
+                <Handle key={`c${sx}${sy}`} id={`rs-c${sx}${sy}`} shape="square" position={[x, y, z]} hoverColor={accent} cursor="nwse-resize" onStart={resizeStart([sx, sy], false)} />
+              ))}
+              {mids.map(([sx, sy, x, y]) => (
+                <Handle key={`m${sx}${sy}`} id={`rs-m${sx}${sy}`} shape="dot" px={8} position={[x, y, z]} hoverColor={accent} cursor={sx ? 'ew-resize' : 'ns-resize'} onStart={resizeStart([sx, sy], false)} />
+              ))}
+              <Handle id="rs-top" shape="square" position={[c.x, c.y, max.z]} hoverColor={accent} cursor="ns-resize" onStart={resizeStart([0, 0], true)} />
+              {/* Pro has its own arrows and rings for moving and turning, so its box only resizes. */}
+              {!pro && <Handle id="rs-lift" shape="cone" px={16} position={[c.x, c.y, max.z + off]} hoverColor={accent} cursor="ns-resize" onStart={liftStart} />}
+              {!pro &&
+                arcs.map((a) => (
+                  <group key={a.axis}>
+                    <Line points={a.points} color={axisColor[a.axis]} lineWidth={2.5} depthTest={false} renderOrder={15} />
+                    <Handle id={`rs-rot${a.axis}`} shape="sphere" px={13} color={axisColor[a.axis]} position={a.dot} hoverColor={colors.hover} cursor="grab" onStart={rotateStart(a.axis)} />
+                  </group>
+                ))}
+            </>
+          )}
+        </group>
+      </group>
+    </>
+  );
+}
+
+interface Protractor {
+  axis: 0 | 1 | 2;
+  center: Vector3;
+  normal: Vector3;
+  /** Unit vector from the center to where the drag started. */
+  start: Vector3;
+  radius: number;
+  angle: number;
+  /** True while the cursor is inside the ring, where rotation snaps to 1 degree instead of 22.5. */
+  fine: boolean;
+}
+
+/** Tinkercad-style protractor shown while a rotate arc is dragged. */
+function ProtractorView({ p, color, text }: { p: Protractor; color: string; text: string }) {
+  const { center, normal, start, radius, angle, fine } = p;
+  const side = normal.clone().cross(start).normalize();
+  const at = (t: number, r: number) => center.clone().addScaledVector(start, r * Math.cos(t)).addScaledVector(side, r * Math.sin(t)).toArray() as [number, number, number];
+  const ring = (r: number) => Array.from({ length: 97 }, (_, i) => at((i / 96) * Math.PI * 2, r));
+  const ticks: [number, number, number][][] = [];
+  for (let i = 0; i < 16; i++) {
+    const t = (i * Math.PI) / 8;
+    ticks.push([at(t, radius * (i % 4 === 0 ? 0.88 : 0.93)), at(t, radius)]);
+  }
+  const fineTicks: [number, number, number][][] = [];
+  for (let i = 0; i < 72; i++) {
+    const t = (i * Math.PI) / 36;
+    fineTicks.push([at(t, radius * 0.8), at(t, radius * (i % 2 ? 0.77 : 0.74))]);
+  }
+  const sweep = Array.from({ length: 33 }, (_, i) => at((angle * i) / 32, radius * 0.6));
+  const deg = (angle * 180) / Math.PI;
+  return (
+    <group renderOrder={20}>
+      <Line points={ring(radius)} color={color} lineWidth={fine ? 1 : 2} transparent opacity={fine ? 0.5 : 0.95} depthTest={false} renderOrder={20} />
+      <Line points={ring(radius * 0.8)} color={color} lineWidth={fine ? 2 : 1} transparent opacity={fine ? 0.95 : 0.5} depthTest={false} renderOrder={20} />
+      {ticks.map((t, i) => (
+        <Line key={`t${i}`} points={t} color={color} lineWidth={1.5} depthTest={false} renderOrder={20} />
+      ))}
+      {fineTicks.map((t, i) => (
+        <Line key={`f${i}`} points={t} color={color} lineWidth={1} transparent opacity={0.6} depthTest={false} renderOrder={20} />
+      ))}
+      <Line points={[center.toArray() as [number, number, number], at(0, radius)]} color={text} lineWidth={1} dashed dashSize={radius * 0.04} gapSize={radius * 0.03} depthTest={false} renderOrder={20} />
+      <Line points={[center.toArray() as [number, number, number], at(angle, radius)]} color={color} lineWidth={2} depthTest={false} renderOrder={20} />
+      {Math.abs(angle) > 1e-6 && <Line points={sweep} color={color} lineWidth={3} depthTest={false} renderOrder={20} />}
+      <Html position={at(angle, radius * 1.18)} center zIndexRange={[40, 30]}>
+        <div className="dim-chip active">
+          {deg > 0 ? '+' : ''}
+          {formatNum(deg, 1)}°<span className="chip-hint">{fine ? ' 1° steps' : ' 22.5° steps'}</span>
+        </div>
+      </Html>
     </group>
   );
 }

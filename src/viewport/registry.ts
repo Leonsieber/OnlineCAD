@@ -30,4 +30,7 @@ export const viewRefs: {
   handleDragging: boolean;
   handleHovered: boolean;
   canvas: HTMLCanvasElement | null;
-} = { controls: null, camera: null, gizmoAxis: () => null, gizmoDragging: false, handleDragging: false, handleHovered: false, canvas: null };
+  /** The WebGL renderer and a synchronous render, for image export. */
+  renderer: import('three').WebGLRenderer | null;
+  renderNow: (() => void) | null;
+} = { controls: null, camera: null, gizmoAxis: () => null, gizmoDragging: false, handleDragging: false, handleHovered: false, canvas: null, renderer: null, renderNow: null };
